@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel an in-flight run when the same branch is pushed again.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      # Pinned to current majors (verified against the CI-green sibling repos):
+      # checkout v7, setup-python v7.
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest -q
+
+      # The gate protects the MEASUREMENT rather than a product. It fails when
+      # erasure regresses AND when everything suddenly passes. Perfect
+      # detector recall or weak strategies that stop leaking both mean the
+      # corpus has been fitted to its own answers and can no longer tell a
+      # thorough erasure from a careless one.
+      - name: Boundary gate
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m boundary.gate
+
+      # The demo is the offline end-to-end path. Running it in CI keeps
+      # SAMPLE_RUN.md honest: if the demo breaks, the build breaks.
+      - name: Demo (offline mock)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/run_demo.py

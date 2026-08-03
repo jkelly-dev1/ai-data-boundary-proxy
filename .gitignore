@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+KEY_INFO.md
+*.local.md
+# Run artifacts at any depth. AuditLog writes here at runtime and nothing
+# needs to be committed to hold the place; a "!audit/.gitkeep" negation does
+# nothing, because git does not descend into an excluded directory.
+audit/

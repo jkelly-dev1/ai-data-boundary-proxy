@@ -1,0 +1,1 @@
+A data-boundary proxy for AI systems that measures what its own controls miss: PII detection with recall below 1.0, egress policy that denies before it redacts, per-tenant retrieval scoping, and right-to-erasure verified against ten reachability paths -- the derived embeddings, and crypto-shredding, which does not close them.

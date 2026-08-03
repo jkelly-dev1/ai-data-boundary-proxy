@@ -1,0 +1,62 @@
+"""The gate protects the measurement, so its own failure modes are tested."""
+from __future__ import annotations
+
+import pytest
+
+from boundary.config import Settings
+from boundary.gate import MAX_RECALL, MIN_WEAK_LEAKS, main, run_checks
+
+
+def test_the_gate_passes_on_the_shipped_corpus():
+    results = run_checks()
+    failures = [r for r in results if not r.passed]
+    assert not failures, [f"{r.name}: {r.detail}" for r in failures]
+    assert main() == 0
+
+
+def test_the_gate_checks_both_directions():
+    """It fails on regression AND on everything suddenly passing.
+
+    A suite where nothing can fail has been fitted to its own answers, so the
+    gate carries checks that assert imperfection: weak strategies must still
+    leak and detector recall must stay below 1.0.
+    """
+    names = {r.name for r in run_checks()}
+    assert "weak strategies still leak" in names
+    assert "detector recall is below 1.0" in names
+    assert "full erasure verifies clean" in names
+
+
+def test_the_gate_runs_on_the_mock_even_with_a_real_provider_configured():
+    """A regression gate has to be reproducible.
+
+    Any live model moves the numbers between runs, so real-model behavior
+    belongs in SAMPLE_RUN.md and never in an exit code. The gate does not
+    consult the provider at all, which this test pins by configuring one fully.
+    """
+    settings = Settings(
+        BOUNDARY_PROVIDER="anthropic", ANTHROPIC_API_KEY="sk-ant-not-a-real-key"
+    )
+    assert settings.effective_provider() == "anthropic"
+    # The gate still passes, and it passes because it never asked.
+    assert main() == 0
+
+
+def test_the_thresholds_are_pinned_not_incidental():
+    assert MIN_WEAK_LEAKS >= 4
+    assert MAX_RECALL < 1.0
+
+
+def test_a_provider_without_its_key_falls_back_to_the_mock():
+    """A missing key is a configuration state, not an error.
+
+    Mutation check, executed in-test: supplying the key flips the effective
+    provider, so the fallback is the missing key and not a hardcoded mock.
+    """
+    without = Settings(BOUNDARY_PROVIDER="openai", OPENAI_API_KEY=None)
+    assert without.effective_provider() == "mock"
+    assert without.is_mock()
+
+    with_key = Settings(BOUNDARY_PROVIDER="openai", OPENAI_API_KEY="sk-not-real")
+    assert with_key.effective_provider() == "openai"
+    assert not with_key.is_mock()

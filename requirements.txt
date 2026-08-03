@@ -1,0 +1,20 @@
+# Runtime and test dependencies for CI. The measurement layer is pure Python:
+# no numpy, no scipy, no sklearn. The bootstrap resampling, the cosine
+# similarity and the vector index are written out in this repository so the
+# definitions are visible rather than delegated.
+pydantic>=2.7,<3
+pydantic-settings>=2.3,<3
+pytest>=8,<10
+
+# Required, not optional: the crypto-shredding erasure strategies use Fernet
+# (AES-128-CBC with an HMAC-SHA256 tag) and no primitive is implemented in this
+# repository. Hand-rolling a cipher to stay dependency-free would be the wrong
+# thing to demonstrate in a project about doing security properly.
+cryptography>=42
+
+# Optional real-model providers. Both are imported lazily and are needed only
+# by scripts/real_run.py, which is the one paid path in this repository. The
+# offline test suite, the demo and the gate never import them: tests/test_
+# providers.py exercises both adapters with injected fake clients instead.
+# anthropic>=0.40
+# openai>=1.40
