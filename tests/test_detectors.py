@@ -15,6 +15,12 @@ from boundary.detectors import (
     luhn_ok,
     merge_overlaps,
 )
+from boundary.gate import (
+    EXPECTED_FALSE_NEGATIVES,
+    EXPECTED_TRUE_POSITIVES,
+    FALSE_POSITIVE_CONTROL,
+    MIN_RECALL,
+)
 from boundary.metrics import correlate, score_detector
 from boundary.models import DataClass
 
@@ -62,12 +68,28 @@ def test_person_name_recall_is_below_one_and_that_is_the_finding():
         assert widened(f"{name} signed the form."), name
 
 
-def test_overall_recall_stays_below_one_on_the_labeled_set(suite):
-    """The gate depends on this staying honest."""
+def test_overall_recall_stays_inside_its_band_on_the_labeled_set(suite):
+    """The gate depends on this staying honest in BOTH directions.
+
+    Below 1.0, because perfect recall means the unrostered names were added to
+    the roster. Above the floor, because a check with only a ceiling is
+    satisfied by a suite that detects nothing: deleting one detector moves
+    recall from 11/13 to 10/13 and a ceiling alone reads that as fine.
+
+    Mutation check, executed against the detectors: delete the ACCOUNT_NUMBER
+    pattern and recall is 0.769 with 3 misses, which the floor and the exact
+    miss count both catch. Stub the false-positive counter and the control
+    case, which MUST score one, scores zero.
+    """
     score = score_detector("all", LABELED, suite.run)
     assert score.recall.point < 1.0
-    assert score.false_negatives >= 1
+    assert score.recall.point >= MIN_RECALL, score.recall
+    assert score.false_negatives == EXPECTED_FALSE_NEGATIVES
+    assert score.true_positives == EXPECTED_TRUE_POSITIVES
     assert score.false_positives == 0
+
+    control = score_detector("control", FALSE_POSITIVE_CONTROL, suite.run)
+    assert control.false_positives == 1, "the false-positive counter is dead"
 
 
 def test_a_second_detector_is_not_independent_of_the_first():
@@ -109,6 +131,67 @@ def test_merge_overlaps_keeps_the_longer_span():
         for f in detect_strict(text) + detect_loose(text)
         if f.data_class is DataClass.PHONE
     )
+
+
+def test_label_rules_match_the_label_loosely_and_the_value_strictly():
+    """Case-insensitivity belongs to the label, not to the value beside it.
+
+    "Title:" and "TITLE:" both introduce a job title; "title: see attached"
+    does not, and "patient id: pending" is not a record number. The value
+    class is [A-Z]-anchored for exactly that reason, and a pattern-wide re.I
+    would turn the anchor into any letter.
+
+    Mutation check, executed against the detector: compile the three label
+    rules with re.I and "patient id: pending" is reported as an MRN with the
+    value "pending", which the third assertion catches.
+    """
+    for text in ("Title: Staff Engineer", "TITLE: Staff Engineer", "title: Staff Engineer"):
+        assert [f.data_class for f in detect_context(text)] == [DataClass.JOB_TITLE], text
+    assert not detect_context("title: see attached")
+    assert not detect_context("patient id: pending")
+    assert not detect_context("employer: acme robotics")
+
+    found = detect_context("Patient ID: MR-44719 admitted.")
+    assert [(f.data_class, f.text) for f in found] == [(DataClass.MRN, "MR-44719")]
+
+
+def test_two_classes_claiming_one_span_are_reduced_to_one():
+    """Identical spans of different classes would redact into debris.
+
+    Control, executed in-test: the raw loose findings are shown to hold two
+    classes on the same span, so the reduction is the merge's doing.
+
+    Mutation check, executed against `merge_overlaps`: drop the identical-span
+    rule and the suite returns both findings, and redaction produces
+    `'Zip *******34ssn] here.'`.
+    """
+    from boundary.redaction import Redactor
+
+    text = "Zip 78704-1234 here."
+    raw = dedupe(detect_loose(text))
+    assert len(raw) == 2 and len({f.span for f in raw}) == 1, raw
+    assert {f.data_class for f in raw} == {DataClass.SSN, DataClass.POSTAL_CODE}
+
+    findings = default_suite().run(text)
+    assert [f.data_class for f in findings] == [DataClass.SSN]
+    assert Redactor().apply(text, findings).text == "Zip [REDACTED:ssn] here."
+
+
+def test_the_card_span_ends_on_its_last_digit():
+    """A separator after the number is not part of the number.
+
+    Mutation check, executed against the pattern: allow a trailing separator
+    inside the match and the span grows to include the following space, so
+    the redacted text reads `Card ************1111expires soon.`.
+    """
+    for text in (
+        "Card 4111 1111 1111 1111 expires soon.",
+        "Card 4111-1111-1111-1111 expires soon.",
+    ):
+        cards = [f for f in detect_strict(text) if f.data_class is DataClass.CREDIT_CARD]
+        assert len(cards) == 1, text
+        assert (cards[0].span.start, cards[0].span.end) == (5, 24), cards[0]
+        assert cards[0].text == text[5:24]
 
 
 def test_context_detector_finds_a_value_that_is_weak_on_its_own():

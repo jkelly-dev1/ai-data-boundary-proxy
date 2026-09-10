@@ -379,7 +379,9 @@ def section_audit(settings) -> None:
     print(RULE)
     print("6. Audit trail")
     print(RULE)
-    audit = AuditLog()
+    # The file is where AUDIT_LOG_PATH points, and the demo says which. A
+    # configuration key that names a file nothing writes is worse than no key.
+    audit = AuditLog(path=settings.audit_log_path)
     proxy = build_proxy(key=settings.key_bytes(), roster=ROSTER, audit=audit)
     for dest in (Destination.INTERNAL_MODEL, Destination.VENDOR_NO_TRAIN):
         proxy.send(
@@ -392,6 +394,15 @@ def section_audit(settings) -> None:
     intact, bad, reason = audit.verify_chain()
     print(f"  records                                {len(audit)}")
     print(f"  chain intact                           {intact} ({reason})")
+    if settings.audit_log_path:
+        on_disk = AuditLog.read(settings.audit_log_path)
+        print(
+            f"  written to                             {settings.audit_log_path} "
+            f"({len(on_disk)} records, re-read chain intact "
+            f"{on_disk.verify_chain()[0]})"
+        )
+    else:
+        print("  written to                             nowhere: AUDIT_LOG_PATH is unset")
 
     # Three tampers, because they break the chain in three different places
     # and a log that only detects one of them is not tamper-evident.

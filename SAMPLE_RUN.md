@@ -4,7 +4,7 @@ Verbatim captures of `scripts/run_demo.py`, the boundary gate, the test suite,
 and the paid `scripts/real_run.py`, so a reviewer without an API key can see
 exactly what this project measures and what it refuses to claim. Nothing here
 is retyped, reformatted or cleaned up: every rate, interval, count and verdict
-below is the one the run produced. Offline captures 2026-07-31; real-model
+below is the one the run produced. Offline captures 2026-09-08; real-model
 captures 2026-08-02.
 
 Which captures are real, stated once so nothing below is over-read. Every number
@@ -210,7 +210,7 @@ ai-data-boundary-proxy demo
 
   THE LIMIT IS THE SHARED RECORD, AT EVERY LAYER. The two probes
   that go clean are the ones covering artifacts about this subject
-  ALONE: the cached answer and the retained prompt. A support
+  ALONE -- the cached answer and the retained prompt. A support
   ticket another person owns is wrapped for both of them, so their
   key still opens it and the subject is still named inside. Sealing
   the vectors too closes the neighbor path for the subject's own
@@ -257,6 +257,7 @@ ai-data-boundary-proxy demo
 ==============================================================================
   records                                4
   chain intact                           True (chain intact)
+  written to                             nowhere: AUDIT_LOG_PATH is unset
   edit a record's contents               False at index 0: record contents do not match its hash
   reorder two records                    False at index 0: sequence gap: record claims seq 1 at index 0
   excise a record from the middle        False at index 1: sequence gap: record claims seq 2 at index 1
@@ -288,7 +289,9 @@ The gate protects the MEASUREMENT rather than a product. It fails when erasure
 regresses and it also fails when everything suddenly passes: perfect detector
 recall, or weak strategies that stop leaking, both mean the corpus has been
 fitted to its own answers and can no longer tell a thorough erasure from a
-careless one.
+careless one. Detection is held from below as well: recall has a floor of 0.80
+beside its ceiling, the misses are pinned to the two unrostered names, and the
+zero-false-positive line is read beside a control case that must count one.
 
 ```
 python -m boundary.gate ; echo "exit=$?"
@@ -310,11 +313,12 @@ ai-data-boundary-proxy gate: deterministic mock, offline
   [PASS] a key-blind sweep finds less than a key-aware one              blind 8 vs key-aware 18 artifacts
   [PASS] a key-aware re-ingest is deterministic and does not resurrect  7 -> 7 leaking, 2 documents skipped as undecryptable, identical across two runs
   [PASS] neighbor threshold sits between the populations                0.071 < 0.1 < 0.120
-  [PASS] detector recall is below 1.0                                   recall 0.846 [0.615, 1.000] n=13
-  [PASS] detector precision is perfect on the labeled set               0 false positives
+  [PASS] detector recall is above the floor and below 1.0               recall 0.846 [0.615, 1.000] n=13 (floor 0.8, ceiling 0.999)
+  [PASS] the misses are exactly the unrostered names                    11 found, 2 missed (expected 11 and 2)
+  [PASS] detector precision is perfect on the labeled set               0 false positives; the control case that must produce one produced 1
   [PASS] second detector's marginal gain is reported, not assumed       loose adds 0.167 over strict; error overlap 0.455
 
-GATE PASSED (15 checks)
+GATE PASSED (16 checks)
   erasure is still graded, detection is still imperfect, and the
   corpus can still tell a thorough erasure from a careless one.
 exit=0
@@ -327,17 +331,19 @@ pytest -q
 ```
 
 ```
-...................................s.s.................................. [ 94%]
-........                                                                 [100%]
-150 passed, 2 skipped in 1.40s
+........................................................................ [ 42%]
+........................................................................ [ 84%]
+...........................                                              [100%]
+171 passed in 2.44s
 ```
 
-The two skips are the point, not an omission. `openai` and `anthropic` are
-optional and are not in `requirements.txt`, so the offline suite installs
-nothing that can reach a network. The two skipped tests assert on a CONSTRUCTED
-real adapter and need the SDK; the routing decision they exist to protect is
-asserted unconditionally by tests that run everywhere. Install the extras and
-the count is 152 with nothing skipped.
+This capture was taken with the optional SDKs installed, so nothing is
+skipped. Without them the same suite is 169 passed and 2 skipped, and the two
+skips are the point, not an omission: `openai` and `anthropic` are not in
+`requirements.txt`, so the offline suite installs nothing that can reach a
+network, and the two tests that assert on a CONSTRUCTED real adapter skip
+when the SDK is absent. The routing decision they exist to protect is asserted
+unconditionally by tests that run everywhere.
 
 The script tests are the slow ones and the reason the total moved from 0.26s:
 they launch the documented commands as subprocesses with `PYTHONPATH` stripped,
@@ -373,7 +379,8 @@ exactly that state: source gone, chunks gone, caches gone, vector still
 answering.
 
 Detection is imperfect and the number is published. Overall recall `0.846
-[0.615, 1.000]` with zero false positives on the labeled set. The two misses are
+[0.615, 1.000]` with zero false positives on the labeled set, held by the gate
+inside a band with a floor of 0.80 as well as a ceiling below 1.0. The two misses are
 the two names the roster does not carry. A boundary that depends on catching
 every name is a boundary that leaks; the control is policy, not a better
 pattern.

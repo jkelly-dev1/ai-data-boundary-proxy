@@ -15,10 +15,11 @@ behavior is reported in SAMPLE_RUN.md and never reaches an exit code.
 """
 from __future__ import annotations
 
+import math
 import sys
 from dataclasses import dataclass
 
-from boundary.corpus import LABELED, ROSTER, build_corpus
+from boundary.corpus import LABELED, ROSTER, UNROSTERED, build_corpus
 from boundary.detectors import default_suite, detect_loose, detect_strict
 from boundary.embeddings import default_embedder
 from boundary.erasure import (
@@ -34,10 +35,42 @@ from boundary.verify import ErasureVerifier, separation_band, NEIGHBOR_THRESHOLD
 # The weak strategies must still leak by at least this much, or the corpus has
 # stopped being able to tell a thorough erasure from a careless one.
 MIN_WEAK_LEAKS = 4
-# Overall detector recall must stay strictly below 1.0. Perfect recall on this
-# corpus means the unrostered names were quietly added to the roster, which
-# would delete the project's most honest finding.
+# Overall detector recall is held inside a BAND, and both edges do work.
+#
+# The ceiling: perfect recall on this corpus means the unrostered names were
+# quietly added to the roster, which would delete the project's most honest
+# finding. The floor: the labeled set has 13 expected (case, class) pairs and
+# the roster misses exactly two of them, so the shipped recall is 11/13 =
+# 0.846. Losing ANY further class, one deleted detector, one pattern edited
+# into something that cannot match, moves it to 10/13 = 0.769, and a check
+# that only bounded the top would call that an improvement. A check with only
+# a ceiling is satisfied by a detector suite that finds nothing at all.
+MIN_RECALL = 0.80
 MAX_RECALL = 0.999
+
+# What the labeled set says the misses ARE. Every expected pair not on the
+# roster is found, so the false-negative count is the unrostered name count
+# and the true-positive count is everything else. Pinning the counts rather
+# than only the ratio means a change that trades one miss for another is
+# visible even when the ratio would come out the same.
+EXPECTED_FALSE_NEGATIVES = len(UNROSTERED)
+EXPECTED_TRUE_POSITIVES = (
+    sum(len(expected) for _, expected in LABELED) - EXPECTED_FALSE_NEGATIVES
+)
+
+# A labeled case built to PRODUCE a false positive: a Luhn-valid 16-digit
+# number the label says is not a card. The scorer must count it. A counter
+# that has stopped counting reads 0 on the real set, and 0 is exactly the
+# value the precision check wants to see, so the check runs this control
+# beside the real set and refuses a 0 that the control cannot explain.
+FALSE_POSITIVE_CONTROL = (("Order 4111111111111111 shipped.", ()),)
+
+# The published correlation figures, as the fractions they are computed from:
+# loose catches 1 of the 6 cases strict misses, and both miss 5 of the 11
+# misses between them. Pinned so the formula cannot be edited into one that
+# reports a different number while the check still reads "reported".
+EXPECTED_MARGINAL_GAIN = 1 / 6
+EXPECTED_ERROR_OVERLAP = 5 / 11
 
 
 @dataclass
@@ -131,30 +164,46 @@ def run_checks() -> list[GateResult]:
         )
     )
 
-    # 3. Detection must remain imperfect and honest about it.
+    # 3. Detection must remain imperfect, adequate, and honest about both.
     suite = default_suite(ROSTER)
     overall = score_detector("all", LABELED, suite.run)
     results.append(
         GateResult(
-            "detector recall is below 1.0",
-            overall.recall.point < MAX_RECALL,
-            f"recall {overall.recall}",
+            "detector recall is above the floor and below 1.0",
+            overall.recall.point >= MIN_RECALL
+            and overall.recall.point < MAX_RECALL,
+            f"recall {overall.recall} (floor {MIN_RECALL}, ceiling {MAX_RECALL})",
         )
     )
     results.append(
         GateResult(
+            "the misses are exactly the unrostered names",
+            overall.false_negatives == EXPECTED_FALSE_NEGATIVES
+            and overall.true_positives == EXPECTED_TRUE_POSITIVES,
+            f"{overall.true_positives} found, {overall.false_negatives} missed "
+            f"(expected {EXPECTED_TRUE_POSITIVES} and {EXPECTED_FALSE_NEGATIVES})",
+        )
+    )
+    control = score_detector("control", FALSE_POSITIVE_CONTROL, suite.run)
+    results.append(
+        GateResult(
             "detector precision is perfect on the labeled set",
-            overall.false_positives == 0,
-            f"{overall.false_positives} false positives",
+            overall.false_positives == 0 and control.false_positives == 1,
+            f"{overall.false_positives} false positives; the control case "
+            f"that must produce one produced {control.false_positives}",
         )
     )
 
     # 4. Stacked detectors must not be assumed independent.
     corr = correlate(LABELED, detect_strict, detect_loose, "strict", "loose")
+    recomputed_gain = corr.b_only / (corr.b_only + corr.neither)
     results.append(
         GateResult(
             "second detector's marginal gain is reported, not assumed",
-            corr.marginal_gain < 1.0,
+            0.0 < corr.marginal_gain < 1.0
+            and math.isclose(corr.marginal_gain, recomputed_gain)
+            and math.isclose(corr.marginal_gain, EXPECTED_MARGINAL_GAIN)
+            and math.isclose(corr.error_overlap, EXPECTED_ERROR_OVERLAP),
             f"loose adds {corr.marginal_gain:.3f} over strict; "
             f"error overlap {corr.error_overlap:.3f}",
         )

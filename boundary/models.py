@@ -303,12 +303,20 @@ class EgressRequest:
 
 @dataclass
 class EgressResult:
-    """What the proxy actually did, and what left."""
+    """What the proxy actually did, and what left.
+
+    `strategies` is the per-class list of what the redactor DID to the text
+    that left: one (class, strategy) pair for every class whose spans were
+    rewritten, and empty when nothing was rewritten because the request was
+    allowed unchanged or denied. It is read off the applied findings rather
+    than declared, so it reports the strategy table in force rather than a
+    name for it.
+    """
 
     verdict: PolicyVerdict
     forwarded_text: Optional[str]
     original_text: str
-    strategy: RedactionStrategy
+    strategies: tuple[tuple[DataClass, RedactionStrategy], ...] = ()
 
     @property
     def left_the_boundary(self) -> bool:
@@ -364,12 +372,19 @@ class LeakProbe:
     erasure claimed to be complete. Each probe names a different reachability
     path, because they fail independently: an index tombstone can be honored by
     one query path and ignored by another.
+
+    `applicable` false means the probe had nothing to examine: no neighboring
+    tenant to search from, no key material in a plaintext posture. That is a
+    different statement from "looked and found nothing", and a report that
+    let the two share `leaked=False` would count a probe that could not look
+    as a probe that came back clean.
     """
 
     probe: str
     leaked: bool
     detail: str = ""
     hits: tuple[str, ...] = ()
+    applicable: bool = True
 
 
 @dataclass
@@ -387,9 +402,19 @@ class VerificationReport:
     def leaking_probes(self) -> tuple[LeakProbe, ...]:
         return tuple(p for p in self.probes if p.leaked)
 
+    @property
+    def inapplicable_probes(self) -> tuple[LeakProbe, ...]:
+        """Probes that could not look. A clean verdict does not count them."""
+        return tuple(p for p in self.probes if not p.applicable)
+
     def summary(self) -> str:
         n = len(self.leaking_probes)
+        live = len(self.probes) - len(self.inapplicable_probes)
+        skipped = ""
+        if self.inapplicable_probes:
+            names = ", ".join(p.probe for p in self.inapplicable_probes)
+            skipped = f", {len(self.inapplicable_probes)} not applicable: {names}"
         if n == 0:
-            return f"{self.subject_id}: no probe found the subject ({len(self.probes)} run)"
+            return f"{self.subject_id}: no probe found the subject ({live} run{skipped})"
         names = ", ".join(p.probe for p in self.leaking_probes)
-        return f"{self.subject_id}: STILL REACHABLE via {n} probe(s): {names}"
+        return f"{self.subject_id}: STILL REACHABLE via {n} probe(s): {names}{skipped}"

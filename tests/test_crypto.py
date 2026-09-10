@@ -184,10 +184,36 @@ def test_a_probe_reads_what_the_running_system_can_read():
     assert before.leaked, "an encrypted store with live keys is not erased"
 
     # And the stored bytes really are ciphertext, so a naive byte match would
-    # have reported clean. This is the mutation check.
+    # have reported clean. This is the control for what follows.
     assert not any(
         rivera.matches(d.text) for d in corpus.store.documents.values()
     )
+
+    # `readable()` itself, asserted directly rather than through whichever
+    # probe happens to call it: the stored bytes do not name the subject and
+    # what the running system reads out of them does. Mutation check,
+    # executed against the verifier: return the stored bytes from
+    # `readable()` and this is the assertion that fails, while the string
+    # probes above go quiet and the report reads cleaner than it is.
+    hr = corpus.store.documents["acme-hr-001"]
+    assert rivera.matches(verifier.readable(hr.doc_id, hr.text))
+    string_probes = {
+        p.probe: p.leaked
+        for p in before.probes
+        if p.probe in ("source_scan", "chunk_scan", "index_text_scan")
+    }
+    assert all(string_probes.values()), string_probes
+
+    # Once the live key is gone the subject's own record resolves to nothing,
+    # which is what crypto-shredding is: unreadability rather than absence.
+    # The ticket another subject owns stays readable through that subject's
+    # wrap, so it is the HR record's hit that must disappear, not the probe.
+    keys.destroy(rivera.subject_id)
+    assert verifier.readable(hr.doc_id, hr.text) == ""
+    source_scan = next(
+        p for p in verifier.verify(rivera).probes if p.probe == "source_scan"
+    )
+    assert hr.doc_id not in source_scan.hits, source_scan
 
 
 def test_encrypting_a_chunk_does_not_change_its_vector():

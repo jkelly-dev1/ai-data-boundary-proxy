@@ -57,8 +57,10 @@ def test_deleting_the_source_row_leaves_the_subject_fully_retrievable():
 def test_tombstoning_vectors_is_not_removing_them():
     """SOURCE_AND_INDEX marks vectors deleted; the data is still there.
 
-    Mutation check, executed in-test: the same erasure with purge=True (FULL)
-    removes the entries entirely and the tombstone probe goes quiet.
+    Mutation check, executed in-test: FULL, which compacts the index after
+    tombstoning, leaves no tombstoned entry behind and the tombstone probe
+    goes quiet. Remove the `compact()` call from the FULL path and the second
+    block fails, because a tombstone that is never reclaimed is still there.
     """
     _, index, subject, report, _, _, _ = _run(ErasureStrategy.SOURCE_AND_INDEX)
     tombstoned = [e for e in index.entries.values() if e.deleted]

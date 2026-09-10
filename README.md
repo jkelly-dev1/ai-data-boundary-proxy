@@ -130,6 +130,14 @@ it finds the names it was given and misses the two the corpus contains
 deliberately. Real name detection needs a model. The correct control is policy,
 which denies the destination, rather than a better regular expression.
 
+That number is held from both sides. The gate keeps recall inside a band,
+`0.80 <= recall < 0.999`, and pins the misses to exactly the two unrostered
+names, so a detector that stops matching is a failure and not a move toward
+the middle of the band: deleting the one-line ACCOUNT_NUMBER pattern takes
+recall to 0.769 and the gate goes red. The zero-false-positive line is read
+beside a control case that must count one, so a counter that has stopped
+counting cannot pass as perfect precision.
+
 Stacked detectors are not additive. The tempting arithmetic says two detectors
 at 0.5 recall give 0.75. They share a design, so they share their blind spots:
 the measured marginal gain of the `loose` family over `strict` is 0.167 for the
@@ -339,31 +347,41 @@ There are no primitives implemented in this repository.
 | The probe query drops the email domain | `test_the_probe_query_drops_the_email_domain` |
 | The frequency baseline excludes the subject's own mentions | `test_the_frequency_baseline_excludes_the_subjects_own_mentions` |
 | Person-name recall is below 1.0 | `test_person_name_recall_is_below_one_and_that_is_the_finding` |
-| Overall recall stays below 1.0 on the labeled set | `test_overall_recall_stays_below_one_on_the_labeled_set` |
+| Overall recall stays inside its band on the labeled set: below 1.0, above the 0.80 floor, with the misses pinned to the two unrostered names and the false-positive counter shown live on a control case | `test_overall_recall_stays_inside_its_band_on_the_labeled_set` (mutation-checked: delete the ACCOUNT_NUMBER detector and recall falls to 0.769; stub the false-positive counter and the control reads zero) |
+| The label rules match the label loosely and the value strictly, so "patient id: pending" is not a record number | `test_label_rules_match_the_label_loosely_and_the_value_strictly` |
+| Two classes claiming one span are reduced to one before redaction | `test_two_classes_claiming_one_span_are_reduced_to_one` |
+| The card span ends on its last digit | `test_the_card_span_ends_on_its_last_digit` |
 | A second detector is not independent of the first | `test_a_second_detector_is_not_independent_of_the_first` |
 | Completely nested errors report zero marginal gain | `test_completely_nested_errors_report_zero_marginal_gain` |
 | Luhn rejects a number that only looks like a card | `test_luhn_rejects_a_number_that_only_looks_like_a_card` |
 | Structurally impossible SSNs are not reported | `test_structurally_impossible_ssns_are_not_reported` |
 | Restricted identifiers never reach an external vendor | `test_restricted_identifiers_never_reach_an_external_vendor` |
+| Every NEVER_EXTERNAL class is denied by R2 specifically, and a direct identifier outside the set by R3, so the rule that fires is pinned and not only the outcome | `test_every_never_external_class_is_denied_by_r2_specifically`, `test_a_direct_identifier_outside_never_external_is_denied_by_r3` (mutation-checked: disable R3 and the email case becomes redact-and-send) |
 | A third-party tool receives no personal data at all | `test_a_third_party_tool_receives_no_personal_data_at_all` |
 | A mosaic of quasi-identifiers is denied with no direct one present | `test_a_mosaic_of_quasi_identifiers_is_denied_without_any_direct_one` |
 | The policy fails closed when no rule matches | `test_the_policy_fails_closed_when_no_rule_matches` |
 | A denied request forwards nothing | `test_a_denied_request_forwards_nothing` |
+| The egress result reports the strategies actually applied, per class | `test_the_egress_result_reports_the_strategies_actually_applied` |
 | A detector that raises fails closed | `test_a_detector_that_raises_fails_closed` |
 | Every label-driven rule -- job title, employer -- fires somewhere in the corpus, so a rule that stops matching is visible | `test_every_label_rule_class_fires_somewhere_in_the_corpus` (mutation-checked: drop `re.I` from the employer rule and its two corpus hits disappear) |
 | The response is screened as well as the request | `test_the_response_is_screened_as_well_as_the_request` |
+| The response screen keys on the destination the reply came from, and the raw reply is delivered only when policy allows it | `test_the_response_screen_keys_on_the_destination_the_reply_came_from` |
 | Post-filtering by tenant returns fewer results than requested | `test_post_filtering_by_tenant_returns_fewer_results_than_requested` |
 | A query ignoring tombstones still returns deleted vectors | `test_a_query_that_ignores_tombstones_still_returns_deleted_vectors` |
 | Spans are applied right to left so offsets stay valid | `test_spans_are_applied_right_to_left_so_offsets_stay_valid` |
 | No value a detector found survives redaction in cleartext, across every corpus document | `test_no_detected_value_survives_redaction_in_any_corpus_document` (mutation-checked: apply the spans forward, or return the digits from `_partial`, and it fails) |
 | A stable pseudonym lets the recipient link two requests | `test_a_stable_pseudonym_lets_the_recipient_link_two_requests` |
 | Quasi-identifiers survive redaction by default | `test_quasi_identifiers_survive_redaction_by_default` |
+| PARTIAL keeps exactly the last four of a card, PSEUDONYM with no key masks, DROP removes the span | `test_partial_redaction_of_a_card_keeps_only_the_last_four`, `test_pseudonym_without_a_key_falls_back_to_a_mask`, `test_drop_removes_the_span_entirely` |
+| A probe with nobody to leak to reports not-applicable rather than clean | `test_a_probe_with_nobody_to_leak_to_says_so_rather_than_clean` |
 | Overlapping chunks duplicate a mention near a boundary | `test_overlapping_chunks_duplicate_a_mention_near_a_boundary` |
 | Owner-scoped lookup misses mentions in other documents | `test_owner_scoped_lookup_misses_mentions_in_other_documents` |
 | Editing an audit record breaks the chain | `test_editing_a_record_breaks_the_chain` |
 | Excising a record from the middle breaks the chain | `test_excising_a_record_from_the_middle_breaks_the_chain` |
 | A record spliced in from another log, with a valid sequence number and its own valid hash, breaks the chain | `test_a_record_spliced_from_another_log_breaks_the_chain` (mutation-checked: delete the `prev_hash` comparison and only this row fails) |
 | The audit log never stores the data it is about | `test_the_log_never_stores_the_data_it_is_about` |
+| A serialized record carries exactly the hashed fields and the hash, so nothing reaches the file outside the integrity guarantee | `test_a_serialized_record_carries_exactly_the_hashed_fields_and_the_hash` |
+| A configured AUDIT_LOG_PATH receives every record as it is made, and the demo writes the file it names | `test_a_configured_path_receives_every_record_as_it_is_made`, `test_the_demo_writes_the_audit_file_the_configuration_names` |
 | A single observation reports the full range, not certainty | `test_a_single_observation_reports_the_full_range_not_certainty` |
 | The bootstrap never touches the global random state | `test_the_bootstrap_never_touches_the_global_random_state` |
 | The gate runs on the mock even with a real provider configured | `test_the_gate_runs_on_the_mock_even_with_a_real_provider_configured` |
@@ -390,7 +408,7 @@ There are no primitives implemented in this repository.
 | The key probe is scoped to the subject's own wrap | `test_the_key_probe_is_scoped_to_the_subjects_own_wrap` |
 | The key material probe attempts a real decrypt | `test_the_key_material_probe_attempts_a_real_decrypt` |
 | The key probe reports not-applicable on a plaintext store | `test_the_key_probe_reports_not_applicable_on_a_plaintext_store` |
-| A probe reads what the running system can read | `test_a_probe_reads_what_the_running_system_can_read` |
+| A probe reads what the running system can read: `readable()` is asserted directly, plaintext with a live key and empty after the destroy | `test_a_probe_reads_what_the_running_system_can_read` (mutation-checked: return the stored bytes from `readable()` and it fails) |
 | Encrypting a chunk does not change its vector | `test_encrypting_a_chunk_does_not_change_its_vector` |
 | Sealing a vector removes the plaintext copy | `test_sealing_a_vector_removes_the_plaintext_copy` |
 | Variant B closes the neighbor path for subject-only vectors | `test_variant_b_closes_the_neighbor_path_for_subject_only_vectors` |
@@ -415,7 +433,7 @@ There are no primitives implemented in this repository.
 
 ```
 pip install -r requirements.txt
-pytest -q                          # 156 tests, offline; 2 skip without
+pytest -q                          # 171 tests, offline; 2 skip without
                                    # the optional provider SDKs
 python -m boundary.gate            # the CI gate
 python scripts/run_demo.py         # the full demonstration
@@ -425,7 +443,13 @@ Everything above runs offline against a deterministic mock. No key is needed and
 no network call is made. The two skips are the provider-SDK tests: `openai` and
 `anthropic` are optional and are not in `requirements.txt`, so nothing the
 offline suite installs can reach a network. Install the extras and the count is
-152 with nothing skipped.
+171 with nothing skipped. The number is re-derived by the suite itself:
+`test_the_readme_test_count_is_the_collected_count` compares this paragraph to
+`pytest --collect-only`.
+
+Set `AUDIT_LOG_PATH` to write the hash-chained audit trail to a file as each
+record is made; the demo's audit section names the file it wrote and re-reads
+it, and says `nowhere` when the variable is unset.
 
 The paid capture is separate, opt-in, and refuses to run on the mock rather
 than producing a file that looks real:

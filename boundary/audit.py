@@ -17,20 +17,32 @@ rule ids and decisions: never the text, never a detected value. An audit trail
 of privacy decisions that quotes the personal data it was protecting is a second
 copy of the thing you were trying to contain, and it is usually retained longer
 and read by more people than the system it audits.
+
+The trail can be written to disk. A log built with `path` appends each record
+to that file as one canonical JSON line at the moment it is made, so the file
+is the same chain the process holds and `read()` brings it back for
+verification. Without a path the chain lives only in the process.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from pathlib import Path
+from typing import Any, Iterable, Optional, Union
 
 GENESIS = "0" * 64
 
-# Fields covered by the record hash. Listed explicitly so a future field cannot
-# be added to the payload and silently excluded from the integrity guarantee.
+# Fields covered by the record hash. The hashed payload and the serialized
+# line are both BUILT FROM this tuple, so a field cannot be added to the
+# record and reach the file without also entering the hash; `payload()` reads
+# these names off the record rather than listing them a second time.
 HASHED_FIELDS = ("seq", "timestamp", "event", "tenant_id", "detail", "prev_hash")
+
+# Everything a serialized record carries: the hashed fields and the hash
+# itself. The hash is the one field that cannot cover itself.
+SERIALIZED_FIELDS = HASHED_FIELDS + ("record_hash",)
 
 
 def _canonical(payload: dict[str, Any]) -> str:
@@ -48,25 +60,34 @@ class AuditRecord:
     record_hash: str = ""
 
     def payload(self) -> dict[str, Any]:
-        return {
-            "seq": self.seq,
-            "timestamp": self.timestamp,
-            "event": self.event,
-            "tenant_id": self.tenant_id,
-            "detail": self.detail,
-            "prev_hash": self.prev_hash,
-        }
+        return {name: getattr(self, name) for name in HASHED_FIELDS}
 
     def compute_hash(self) -> str:
         return hashlib.sha256(_canonical(self.payload()).encode("utf-8")).hexdigest()
 
+    def serialize(self) -> str:
+        """The record as one canonical JSON line: the payload plus its hash."""
+        return _canonical({**self.payload(), "record_hash": self.record_hash})
+
+    @classmethod
+    def from_json(cls, line: str) -> "AuditRecord":
+        data = json.loads(line)
+        return cls(**{f.name: data[f.name] for f in fields(cls)})
+
 
 @dataclass
 class AuditLog:
-    """Append-only chain of decisions."""
+    """Append-only chain of decisions.
+
+    `path`, when given, is where the chain is written. The file holds THIS
+    log's chain: it is created on the first record and appended to on every
+    record after that, so a reader sees the same sequence the process holds,
+    starting at GENESIS, with nothing from any other process in front of it.
+    """
 
     records: list[AuditRecord] = field(default_factory=list)
     clock: Optional[Any] = None
+    path: Optional[Union[str, Path]] = None
 
     def _now(self) -> str:
         if self.clock is not None:
@@ -87,7 +108,23 @@ class AuditLog:
         )
         rec.record_hash = rec.compute_hash()
         self.records.append(rec)
+        if self.path is not None:
+            target = Path(self.path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            mode = "w" if len(self.records) == 1 else "a"
+            with target.open(mode, encoding="utf-8") as fh:
+                fh.write(rec.serialize() + "\n")
         return rec
+
+    @classmethod
+    def from_jsonl(cls, text: str) -> "AuditLog":
+        """Rebuild a log from serialized lines. Verify it with `verify_chain`."""
+        records = [AuditRecord.from_json(line) for line in text.splitlines() if line]
+        return cls(records=records)
+
+    @classmethod
+    def read(cls, path: Union[str, Path]) -> "AuditLog":
+        return cls.from_jsonl(Path(path).read_text(encoding="utf-8"))
 
     # ------------------------------------------------------------ integrity
 
@@ -117,10 +154,7 @@ class AuditLog:
         return tuple(r for r in self.records if r.event == event)
 
     def to_jsonl(self) -> str:
-        return "\n".join(
-            _canonical({**r.payload(), "record_hash": r.record_hash})
-            for r in self.records
-        )
+        return "\n".join(r.serialize() for r in self.records)
 
     def __len__(self) -> int:
         return len(self.records)

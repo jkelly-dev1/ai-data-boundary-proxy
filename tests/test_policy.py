@@ -39,6 +39,51 @@ def test_restricted_identifiers_never_reach_an_external_vendor(policy):
     assert internal.action is Action.ALLOW
 
 
+def test_a_direct_identifier_outside_never_external_is_denied_by_r3(policy):
+    """R3 is the rule that stops a direct identifier at a default-terms vendor.
+
+    An email is direct but not restricted, so R2 does not apply and R3 is the
+    only rule standing between it and a redact-and-send under R6. The rule id
+    is asserted, not only the outcome, because the outcome alone survives R3
+    being switched off only until it does not.
+
+    Mutation check, executed against the policy: drop R3 and this request
+    becomes `redact / R6-vendor-default-redact` with the text leaving.
+    """
+    verdict = _decide(policy, "Contact jrivera@acme.example", Destination.VENDOR_DEFAULT)
+    assert verdict.action is Action.DENY
+    assert verdict.rule_id == "R3-vendor-default-direct-id"
+
+    no_train = _decide(policy, "Contact jrivera@acme.example", Destination.VENDOR_NO_TRAIN)
+    assert no_train.action is Action.REDACT
+    assert no_train.rule_id == "R5-no-train-vendor-redact"
+
+
+def test_every_never_external_class_is_denied_by_r2_specifically(policy):
+    """NEVER_EXTERNAL membership is pinned by the rule that fires, per class.
+
+    Each restricted class is denied at a default-terms vendor by R2 and not by
+    a later rule that happens to deny direct identifiers too, so removing a
+    class from the set is visible even though R3 would still deny it.
+
+    Mutation check, executed against the policy: remove CREDIT_CARD from
+    NEVER_EXTERNAL and the card sample reports R3, which this catches.
+    """
+    samples = {
+        DataClass.SSN: "SSN 482-19-7734 on file.",
+        DataClass.MRN: "MRN 4471902 admitted Tuesday.",
+        DataClass.CREDIT_CARD: "Card 4111 1111 1111 1111 expires soon.",
+        DataClass.ACCOUNT_NUMBER: "ACCT-88120455 was reconciled.",
+    }
+    assert NEVER_EXTERNAL == frozenset(samples)
+    for data_class, text in samples.items():
+        findings = default_suite().run(text)
+        assert data_class in {f.data_class for f in findings}, data_class
+        verdict = _decide(policy, text, Destination.VENDOR_DEFAULT)
+        assert verdict.action is Action.DENY, data_class
+        assert verdict.rule_id == "R2-restricted-class-external", data_class
+
+
 def test_a_third_party_tool_receives_no_personal_data_at_all(policy):
     verdict = _decide(policy, "Contact jrivera@acme.example", Destination.THIRD_PARTY_TOOL)
     assert verdict.action is Action.DENY

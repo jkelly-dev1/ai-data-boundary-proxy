@@ -20,9 +20,10 @@ plausibly ship, and the first three all leak:
                    remove or rewrite it. Purges caches and prompt logs. Closes
                    the string-reachable paths.
 
-  FULL             everything in MENTION_SWEEP, plus purge (not tombstone) the
-                   vectors and compact the index, so no derived vector for a
-                   removed chunk survives.
+  FULL             everything in MENTION_SWEEP, plus compact the index, so
+                   the tombstones the sweep left are reclaimed and no derived
+                   vector for a removed chunk survives. Compaction is what
+                   turns a delete flag into a removal.
 
 A rewrite-vs-delete decision is built in. When a chunk mentioning the subject
 belongs to a document the subject does not own, deleting it destroys another
@@ -101,19 +102,15 @@ class ErasureEngine:
         if strategy is ErasureStrategy.SOURCE_ONLY:
             return self._source_only(subject)
         if strategy is ErasureStrategy.SOURCE_AND_INDEX:
-            return self._source_and_index(subject, purge=False)
+            return self._source_and_index(subject)
         if strategy is ErasureStrategy.MENTION_SWEEP:
-            return self._mention_sweep(
-                subject, purge=False, compact=False, sweep_documents=False
-            )
+            return self._mention_sweep(subject, compact=False, sweep_documents=False)
         if strategy in (
             ErasureStrategy.CRYPTO_SHRED_TEXT,
             ErasureStrategy.CRYPTO_SHRED_FULL,
         ):
             return self._crypto_shred(subject, strategy)
-        return self._mention_sweep(
-            subject, purge=True, compact=True, sweep_documents=True
-        )
+        return self._mention_sweep(subject, compact=True, sweep_documents=True)
 
     # ------------------------------------------------------------ strategies
 
@@ -130,8 +127,12 @@ class ErasureEngine:
             strategy=ErasureStrategy.SOURCE_ONLY.value,
         )
 
-    def _source_and_index(self, subject: Subject, purge: bool) -> ErasureCertificate:
+    def _source_and_index(self, subject: Subject) -> ErasureCertificate:
         """Documents, their chunks, and their vectors.
+
+        Vectors are TOMBSTONED, which is what a real index does on delete. The
+        entry stays in the segment until a compaction reclaims it, and only
+        FULL runs one.
 
         Note what is NOT here: any document owned by another subject, the
         response cache, and the prompt log. This is the implementation that
@@ -145,10 +146,7 @@ class ErasureEngine:
             for chunk in self.store.chunks_for_document(doc.doc_id):
                 if self.store.remove_chunk(chunk.chunk_id):
                     chunks_removed.append(chunk.chunk_id)
-                if purge:
-                    if self.index.purge(chunk.chunk_id):
-                        vectors_removed.append(chunk.chunk_id)
-                elif self.index.delete(chunk.chunk_id):
+                if self.index.delete(chunk.chunk_id):
                     vectors_removed.append(chunk.chunk_id)
             if self.store.remove_document(doc.doc_id):
                 docs_removed.append(doc.doc_id)
@@ -163,17 +161,19 @@ class ErasureEngine:
         )
 
     def _mention_sweep(
-        self, subject: Subject, purge: bool, compact: bool, sweep_documents: bool
+        self, subject: Subject, compact: bool, sweep_documents: bool
     ) -> ErasureCertificate:
         """Follow the subject everywhere they are string-reachable.
 
-        `sweep_documents` is the difference between MENTION_SWEEP and FULL.
-        Cleaning the chunks, vectors, caches and logs while leaving the SOURCE
-        documents intact produces a system that passes every retrieval probe
-        and silently restores the subject on the next re-ingest, because
-        re-chunking reads the documents. See `rechunk_and_reindex`.
+        `sweep_documents` and `compact` are the difference between
+        MENTION_SWEEP and FULL. Cleaning the chunks, vectors, caches and logs
+        while leaving the SOURCE documents intact produces a system that
+        passes every retrieval probe and silently restores the subject on the
+        next re-ingest, because re-chunking reads the documents. See
+        `rechunk_and_reindex`. Leaving the index uncompacted leaves every
+        tombstoned vector readable by a query path that ignores the flag.
         """
-        base = self._source_and_index(subject, purge=purge)
+        base = self._source_and_index(subject)
 
         chunks_removed = list(base.chunks_removed)
         vectors_removed = list(base.vectors_removed)
@@ -188,10 +188,7 @@ class ErasureEngine:
             if subject_owns or not self.redact_mentions:
                 if self.store.remove_chunk(chunk.chunk_id):
                     chunks_removed.append(chunk.chunk_id)
-                if purge:
-                    if self.index.purge(chunk.chunk_id):
-                        vectors_removed.append(chunk.chunk_id)
-                elif self.index.delete(chunk.chunk_id):
+                if self.index.delete(chunk.chunk_id):
                     vectors_removed.append(chunk.chunk_id)
             else:
                 if self._rewrite_and_reembed(chunk, subject):

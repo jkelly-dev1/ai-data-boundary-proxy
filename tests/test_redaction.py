@@ -9,6 +9,7 @@ from boundary.models import DataClass, RedactionStrategy
 from boundary.redaction import (
     Pseudonymizer,
     Redactor,
+    _partial,
     quasi_identifier_set,
     residual_classes,
 )
@@ -71,11 +72,41 @@ def test_pseudonym_tokens_do_not_reveal_the_value():
 
 
 def test_partial_redaction_of_a_card_keeps_only_the_last_four():
-    out = Redactor().apply(
-        "card 4111 1111 1111 1111 ok", detect_strict("card 4111 1111 1111 1111 ok")
-    ).text
-    assert "1111" in out
-    assert "4111 1111 1111 1111" not in out
+    """The exact output shape, so "keeps four" cannot quietly keep twelve.
+
+    Mutation check, executed against `_partial`: keep 12 digits and the card
+    line reads `card ****111111111111 ok`, which the exact comparison
+    catches; keep 4 for every class and the phone line changes.
+    """
+    text = "card 4111 1111 1111 1111 ok"
+    assert Redactor().apply(text, detect_strict(text)).text == "card ************1111 ok"
+    assert _partial(DataClass.CREDIT_CARD, "4111 1111 1111 1111") == "************1111"
+    assert _partial(DataClass.PHONE, "512-555-0143") == "********43"
+    assert _partial(DataClass.POSTAL_CODE, "78") == "[REDACTED:postal_code]"
+
+
+def test_pseudonym_without_a_key_falls_back_to_a_mask():
+    """No key means no token, and never the raw value.
+
+    Mutation check, executed against `_replacement`: return the value when
+    the pseudonymizer is absent and the address comes through in cleartext.
+    """
+    text = "Contact jrivera@acme.example now."
+    out = Redactor(pseudonymizer=None).apply(text, detect_strict(text))
+    assert out.text == "Contact [REDACTED:email] now."
+    assert out.count == 1
+
+
+def test_drop_removes_the_span_entirely():
+    """DROP leaves nothing where the value was, not a marker and not the value.
+
+    Mutation check, executed against `_replacement`: return the value for DROP
+    and the text is unchanged with a count of zero.
+    """
+    text = "SSN 482-19-7734 on file."
+    out = Redactor(override=RedactionStrategy.DROP).apply(text, detect_strict(text))
+    assert out.text == "SSN  on file."
+    assert out.count == 1
 
 
 def test_quasi_identifiers_survive_redaction_by_default():

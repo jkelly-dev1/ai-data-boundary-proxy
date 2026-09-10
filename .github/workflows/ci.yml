@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# The token can read the repository and nothing else. A workflow that runs
+# `pytest` does not need to write to it.
+permissions:
+  contents: read
+
 # Cancel an in-flight run when the same branch is pushed again.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,11 +26,13 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      # Pinned to current majors (verified against the CI-green sibling repos):
-      # checkout v7, setup-python v7.
-      - uses: actions/checkout@v7
+      # Pinned to commit SHAs rather than to tags. A tag is a pointer the
+      # action's publisher can move, and a workflow that follows it runs
+      # whatever the tag points at next, with no change visible here. The
+      # release each SHA corresponds to is beside it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip

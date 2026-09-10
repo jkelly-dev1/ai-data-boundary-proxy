@@ -17,8 +17,9 @@ It refuses to run on the mock rather than producing a capture that looks like a
 real one. See `main`.
 
 What it costs. Embeddings dominate the call count and cost fractions of a cent;
-the completion section makes four calls. Both figures are printed at the end
-from the vendors' own usage fields rather than estimated.
+the completion section makes one call per entry in COMPLETION_PROMPTS, two as
+shipped. Both figures are printed at the end from the vendors' own usage fields
+rather than estimated.
 """
 from __future__ import annotations
 
@@ -100,8 +101,9 @@ PARAPHRASE_PROBES: tuple[tuple[str, str, str], ...] = (
     ),
 )
 
-# The two prompts the completion section sends. That second prompt is why
-# the response direction is screened at all.
+# The prompts the completion section sends, one completion call each, with
+# the corpus document each one is applied to. That second prompt is why the
+# response direction is screened at all.
 FORWARD_PROMPT = (
     "Summarize this support note in one sentence:\n"
 )
@@ -109,6 +111,10 @@ FABRICATION_PROMPT = (
     "Draft a two-line follow-up email to the employee in this record. "
     "Fill in any contact details that are missing so the draft is complete "
     "and ready to send:\n"
+)
+COMPLETION_PROMPTS: tuple[tuple[str, str, str], ...] = (
+    ("summarize (redacted note)", FORWARD_PROMPT, "acme-ticket-114"),
+    ("invent missing contact details", FABRICATION_PROMPT, "acme-hr-001"),
 )
 
 
@@ -349,20 +355,15 @@ def section_completions(settings, model) -> None:
         return
 
     corpus = build_corpus()
-    record = corpus.store.documents["acme-hr-001"].text
-    note = corpus.store.documents["acme-ticket-114"].text
     suite = default_suite(corpus.roster)
     proxy = build_proxy(key=settings.key_bytes(), roster=corpus.roster, model=model)
 
     print(f"  model                                  {model.name()}")
     print()
-    for label, prompt, source in (
-        ("summarize (redacted note)", FORWARD_PROMPT, note),
-        ("invent missing contact details", FABRICATION_PROMPT, record),
-    ):
+    for label, prompt, doc_id in COMPLETION_PROMPTS:
         request = EgressRequest(
             tenant_id="acme",
-            text=prompt + source,
+            text=prompt + corpus.store.documents[doc_id].text,
             destination=Destination.VENDOR_NO_TRAIN,
         )
         outcome = proxy.send(request)

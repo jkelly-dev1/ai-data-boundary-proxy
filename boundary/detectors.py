@@ -76,8 +76,10 @@ _STRICT_PATTERNS: list[tuple[DataClass, re.Pattern, Callable[[str], bool] | None
      re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), None),
     (DataClass.PHONE,
      re.compile(r"\b\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b"), None),
+    # Separators are allowed only BETWEEN digits, so the span ends on the last
+    # digit and the redaction does not swallow the space after the number.
     (DataClass.CREDIT_CARD,
-     re.compile(r"\b(?:\d[ -]?){13,19}\b"), luhn_ok),
+     re.compile(r"\b\d(?:[ -]?\d){12,18}\b"), luhn_ok),
     (DataClass.IP_ADDRESS,
      re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
      lambda v: all(0 <= int(p) <= 255 for p in v.split("."))),
@@ -109,17 +111,19 @@ _CONTEXT_RULES: list[tuple[DataClass, re.Pattern]] = [
     (DataClass.SEX, re.compile(r"\b(?:sex|gender)\s*[:\-]\s*(male|female|m|f)\b", re.I)),
     (DataClass.POSTAL_CODE,
      re.compile(r"(?:\bzip\b|postal code)\s*[:\-]?\s*(\d{5}(?:-\d{4})?)", re.I)),
-    # re.I on the LABEL is required: real documents write "Title:" and
-    # "Employer:", so a case-sensitive label match silently never fires. The
-    # captured VALUE still requires a leading capital, which is what keeps
-    # "title: see attached" from being read as a job title.
+    # Case-insensitivity is scoped to the LABEL with (?i:...): real documents
+    # write "Title:" and "TITLE:", so a case-sensitive label silently never
+    # fires. The captured VALUE stays case-sensitive and must start with a
+    # capital, which is what keeps "title: see attached" from being read as
+    # a job title and "patient id: pending" from being read as a record
+    # number. A pattern-wide re.I would reach the value class too and turn
+    # [A-Z] into any letter.
     (DataClass.JOB_TITLE,
-     re.compile(r"\b(?:title|role|position)\s*[:\-]\s*([A-Z][A-Za-z ]{3,30})", re.I)),
+     re.compile(r"\b(?i:title|role|position)\s*[:\-]\s*([A-Z][A-Za-z ]{3,30})")),
     (DataClass.EMPLOYER,
-     re.compile(r"\b(?:employer|works at|employed by)\s*[:\-]?\s*([A-Z][A-Za-z ]{2,30})",
-                re.I)),
+     re.compile(r"\b(?i:employer|works at|employed by)\s*[:\-]?\s*([A-Z][A-Za-z ]{2,30})")),
     (DataClass.MRN,
-     re.compile(r"(?:medical record(?: number)?|patient id)\s*[:\-]?\s*([A-Z0-9\-]{5,12})", re.I)),
+     re.compile(r"(?i:medical record(?: number)?|patient id)\s*[:\-]?\s*([A-Z0-9\-]{5,12})")),
 ]
 
 
@@ -225,13 +229,28 @@ def dedupe(findings: Iterable[Finding]) -> list[Finding]:
 
 
 def merge_overlaps(findings: Iterable[Finding]) -> list[Finding]:
-    """Drop findings fully contained inside a longer finding of the same class.
+    """Drop findings fully contained inside a longer finding of the same class,
+    and keep ONE finding where two classes claim the identical span.
 
     A loose phone pattern and a strict one can match nested spans of the same
     number. Redacting both would corrupt the text by replacing part of an
     already-replaced span, so the longer span wins.
+
+    Two classes can also claim exactly the same characters: "78704-1234" is a
+    ZIP+4 to the postal pattern and a nine-digit SSN to the loose one.
+    Redacting both rewrites the second replacement into the first and leaves
+    debris. One claim is kept, and a direct identifier is preferred over a
+    quasi-identifier because it is the stricter of the two redactions.
     """
-    ordered = sorted(findings, key=lambda f: (f.span.start, -len(f.span)))
+    ordered = sorted(
+        findings,
+        key=lambda f: (
+            f.span.start,
+            -len(f.span),
+            not f.data_class.is_direct,
+            f.data_class.value,
+        ),
+    )
     kept: list[Finding] = []
     for f in ordered:
         if any(
@@ -240,6 +259,8 @@ def merge_overlaps(findings: Iterable[Finding]) -> list[Finding]:
             and f.span.end <= k.span.end
             for k in kept
         ):
+            continue
+        if any(k.span == f.span for k in kept):
             continue
         kept.append(f)
     return kept

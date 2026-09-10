@@ -1,0 +1,28 @@
+version: 2
+
+# Actions are referenced by commit SHA rather than by tag, so a moved tag
+# cannot change what CI runs. A SHA that nothing updates is the other failure:
+# it freezes the action and stops receiving its security fixes, which inverts
+# the intent. The github-actions entry below is what keeps the pins current,
+# and it is the reason pinning is safe to do at all.
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      pip-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"

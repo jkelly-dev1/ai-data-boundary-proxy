@@ -117,6 +117,39 @@ def test_the_verifier_does_not_consult_the_lineage_table(indexed):
     assert [p.leaked for p in before.probes] == [p.leaked for p in after.probes]
 
 
+def test_a_probe_with_nobody_to_leak_to_says_so_rather_than_clean(indexed):
+    """"No other tenant" is not applicable, not clean.
+
+    On the shipped two-tenant corpus the cross-tenant probe can look and does.
+    With every other tenant's entries gone from the index it cannot, and its
+    report must be distinguishable from a clean one, or a single-tenant
+    deployment reads an unexamined path as a verified one.
+
+    Mutation check, executed against the probe: report the empty case with
+    `applicable` left at its default and the second block fails.
+    """
+    corpus, index, emb = indexed
+    subject = corpus.subjects[0]
+    two_tenants = ErasureVerifier(corpus.store, index, emb).verify(subject)
+    probes = {p.probe: p for p in two_tenants.probes}
+    assert probes["cross_tenant_probe"].applicable
+    assert probes["cross_tenant_probe"].leaked
+    assert not probes["key_material_probe"].applicable, "plaintext: no key material"
+    assert two_tenants.inapplicable_probes == (probes["key_material_probe"],)
+
+    for chunk_id in list(index.entries):
+        if index.entries[chunk_id].tenant_id != subject.tenant_id:
+            index.purge(chunk_id)
+    assert index.tenants() == (subject.tenant_id,)
+    alone = ErasureVerifier(corpus.store, index, emb).verify(subject)
+    cross = next(p for p in alone.probes if p.probe == "cross_tenant_probe")
+    assert not cross.applicable
+    assert not cross.leaked
+    assert cross.detail.startswith("not applicable")
+    assert cross in alone.inapplicable_probes
+    assert "not applicable" in alone.summary()
+
+
 def test_probes_report_hits_not_just_a_boolean(indexed):
     """A count is believable; a list is checkable.
 

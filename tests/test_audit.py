@@ -2,10 +2,17 @@
 from __future__ import annotations
 
 import json
+from dataclasses import fields
 
 import pytest
 
-from boundary.audit import GENESIS, HASHED_FIELDS, AuditLog
+from boundary.audit import (
+    GENESIS,
+    HASHED_FIELDS,
+    SERIALIZED_FIELDS,
+    AuditLog,
+    AuditRecord,
+)
 
 
 def _seed(log, n=4):
@@ -99,6 +106,58 @@ def test_jsonl_round_trips_as_canonical_json(frozen_audit):
 
 def test_an_empty_log_is_intact():
     assert AuditLog().verify_chain()[0]
+
+
+def test_a_serialized_record_carries_exactly_the_hashed_fields_and_the_hash(frozen_audit):
+    """HASHED_FIELDS is the whole record, not a subset of it.
+
+    A field that reaches the file without entering the hash is content the
+    chain reports intact while it can be edited freely. The serialized keys
+    are therefore asserted EQUAL to the hashed fields plus the hash, and the
+    record's own fields are asserted equal to the same set, so a field added
+    to either place without the other fails here.
+
+    Mutation check, executed against the serializer: add a `note` key to the
+    serialized dict outside the payload and the first assertion fails; add a
+    dataclass field to AuditRecord without adding it to HASHED_FIELDS and the
+    second one does.
+    """
+    log = _seed(frozen_audit, n=2)
+    for line in log.to_jsonl().splitlines():
+        assert set(json.loads(line)) == set(SERIALIZED_FIELDS)
+    assert {f.name for f in fields(AuditRecord)} == set(SERIALIZED_FIELDS)
+    assert set(HASHED_FIELDS) == set(SERIALIZED_FIELDS) - {"record_hash"}
+
+
+def test_a_configured_path_receives_every_record_as_it_is_made(tmp_path):
+    """The file is the chain, written record by record, and it reads back.
+
+    Mutation check, executed against `record`: stop the write and the file is
+    never created; write only on the first record and the line count falls.
+    """
+    target = tmp_path / "trail" / "boundary.audit.jsonl"
+    log = AuditLog(path=target)
+    assert not target.exists()
+
+    log.record(event="egress", tenant_id="acme", detail={"action": "allow"})
+    assert target.read_text(encoding="utf-8").splitlines() == log.to_jsonl().splitlines()
+    log.record(event="ingress", tenant_id="acme", detail={"findings": 0})
+    log.record(event="retrieval", tenant_id="acme", detail={"k": 5})
+    on_disk = target.read_text(encoding="utf-8").splitlines()
+    assert on_disk == log.to_jsonl().splitlines()
+    assert len(on_disk) == 3
+
+    reread = AuditLog.read(target)
+    assert reread.verify_chain() == (True, None, "chain intact")
+    assert [r.record_hash for r in reread.records] == [r.record_hash for r in log.records]
+
+    # An edit on disk is caught on re-read, so the file is evidence and not
+    # a convenience copy.
+    lines = on_disk[:]
+    lines[1] = lines[1].replace('"findings":0', '"findings":9')
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    intact, index, _ = AuditLog.read(target).verify_chain()
+    assert not intact and index == 1
 
 
 def test_a_record_spliced_from_another_log_breaks_the_chain(frozen_audit, request):

@@ -317,10 +317,13 @@ class ErasureVerifier:
         """
         others = [t for t in self.index.tenants() if t != subject.tenant_id]
         if not others:
+            # Nobody to leak to is not the same as nothing leaked, and the
+            # probe says which one it is reporting.
             return LeakProbe(
                 probe="cross_tenant_probe",
                 leaked=False,
-                detail="no other tenant in the index",
+                detail="not applicable: no other tenant in the index",
+                applicable=False,
             )
         qv = self.embedder.embed(subject_query(self.index, subject))
         leaking: list[str] = []
@@ -362,7 +365,8 @@ class ErasureVerifier:
             return LeakProbe(
                 probe="key_material_probe",
                 leaked=False,
-                detail="plaintext posture: no key material exists to survive",
+                detail="not applicable: plaintext posture, no key material exists to survive",
+                applicable=False,
             )
         envelopes = self.sealed.for_subject(subject.subject_id)
         if not envelopes:

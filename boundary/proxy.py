@@ -14,7 +14,12 @@ The response is screened too. A proxy that only inspects the outbound direction
 misses the case where the model returns personal data that was never sent to
 it: retrieved by a tool the model called, recalled from the conversation, or
 reconstructed from context. Screening one direction and calling it a boundary
-is the most common design error in this category.
+is the most common design error in this category. The reply is screened
+against the DESTINATION IT CAME FROM, with the same rules the request met: a
+restricted identifier in a reply from a default-terms vendor is a disclosure
+that vendor now holds, so the reply is refused; the same reply from the
+internal model is allowed through. What the application receives is
+`delivered`, which is the raw reply only when the policy allows it.
 
 Retrieval is tenant-scoped at the SOURCE, using a pre-filter, never a
 post-filter over a global ranking. See index.py for why the post-filter variant
@@ -36,7 +41,6 @@ from boundary.models import (
     EgressRequest,
     EgressResult,
     PolicyVerdict,
-    RedactionStrategy,
 )
 from boundary.policy import PolicyEngine
 from boundary.redaction import Redactor, residual_classes
@@ -71,12 +75,20 @@ class EchoModel:
 
 @dataclass
 class ProxyOutcome:
-    """One full round trip through the boundary."""
+    """One full round trip through the boundary.
+
+    `response` is the reply exactly as the model produced it, kept because the
+    inbound measurement (how many identifiers came back that were never sent)
+    is made on it. `delivered` is what the application may use: the reply
+    unchanged when the response screen allows it, the redacted reply when the
+    screen redacts, and None when the screen denies.
+    """
 
     egress: EgressResult
     response: Optional[str]
     response_verdict: Optional[PolicyVerdict]
     response_redacted: Optional[str]
+    delivered: Optional[str] = None
 
     @property
     def denied(self) -> bool:
@@ -117,7 +129,6 @@ class BoundaryProxy:
                 verdict=verdict,
                 forwarded_text=None,
                 original_text=request.text,
-                strategy=RedactionStrategy.NONE,
             )
 
         verdict = self.policy.decide(request, findings)
@@ -127,25 +138,27 @@ class BoundaryProxy:
                 verdict=verdict,
                 forwarded_text=None,
                 original_text=request.text,
-                strategy=RedactionStrategy.NONE,
             )
         elif verdict.action is Action.ALLOW:
             result = EgressResult(
                 verdict=verdict,
                 forwarded_text=request.text,
                 original_text=request.text,
-                strategy=RedactionStrategy.NONE,
             )
         else:
             redacted = self.redactor.apply(request.text, findings)
             verdict.residual_classes = residual_classes(
                 request.text, findings, self.redactor
             )
+            applied = {
+                (f.data_class, self.redactor.strategy_for(f.data_class))
+                for f in redacted.applied
+            }
             result = EgressResult(
                 verdict=verdict,
                 forwarded_text=redacted.text,
                 original_text=request.text,
-                strategy=RedactionStrategy.MASK,
+                strategies=tuple(sorted(applied, key=lambda pair: pair[0].value)),
             )
 
         if self.audit is not None:
@@ -171,35 +184,47 @@ class BoundaryProxy:
         response = self.model.complete(egress.forwarded_text or "")
 
         if not self.screen_responses:
-            return ProxyOutcome(egress, response, None, None)
+            return ProxyOutcome(egress, response, None, None, delivered=response)
 
-        # The inbound direction is screened with the SAME detectors, because
-        # personal data arriving from the model is the same disclosure as
-        # personal data leaving; it just crossed the boundary the other way.
+        # The inbound direction is screened with the SAME detectors and the
+        # SAME destination, because personal data arriving from the model is
+        # the same disclosure as personal data leaving; it just crossed the
+        # boundary the other way, and the party on the far side is the party
+        # the request went to. Screening every reply as if it came from the
+        # internal model would allow every reply, whatever it carried.
         inbound_findings = self.detectors.run(response)
         inbound_request = EgressRequest(
             tenant_id=request.tenant_id,
             text=response,
-            destination=Destination.INTERNAL_MODEL,
+            destination=request.destination,
             purpose="response_screen",
         )
         verdict = self.policy.decide(inbound_request, inbound_findings)
         redacted = None
         if inbound_findings:
             redacted = self.redactor.apply(response, inbound_findings).text
+        if verdict.action is Action.DENY:
+            delivered = None
+        elif verdict.action is Action.REDACT:
+            delivered = redacted if redacted is not None else response
+        else:
+            delivered = response
 
         if self.audit is not None:
             self.audit.record(
                 event="ingress",
                 tenant_id=request.tenant_id,
                 detail={
+                    "destination": request.destination.value,
+                    "action": verdict.action.value,
+                    "rule_id": verdict.rule_id,
                     "findings": len(inbound_findings),
                     "classes": sorted(
                         {f.data_class.value for f in inbound_findings}
                     ),
                 },
             )
-        return ProxyOutcome(egress, response, verdict, redacted)
+        return ProxyOutcome(egress, response, verdict, redacted, delivered=delivered)
 
     # --------------------------------------------------------- retrieval
 
