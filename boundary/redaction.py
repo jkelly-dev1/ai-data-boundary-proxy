@@ -72,7 +72,8 @@ class Pseudonymizer:
 
     A rotating salt breaks linkage across rotations but also breaks the
     usability that motivated pseudonymization in the first place. That tension
-    is real and the demo reports both sides rather than picking a winner.
+    is stated here and not resolved: BOUNDARY_PSEUDONYM_SALT sets the salt,
+    and choosing a rotation schedule is left to the deployment.
     """
 
     def __init__(self, key: bytes, salt: str = ""):
@@ -121,7 +122,9 @@ class Redactor:
         override: Optional[RedactionStrategy] = None,
     ):
         self.pseudonymizer = pseudonymizer
-        self.strategy = dict(strategy or DEFAULT_STRATEGY)
+        # An explicitly empty mapping means "no per-class choices": every class
+        # then gets MASK from strategy_for. Only None means "use the defaults".
+        self.strategy = dict(DEFAULT_STRATEGY if strategy is None else strategy)
         self.override = override
 
     def strategy_for(self, data_class: DataClass) -> RedactionStrategy:

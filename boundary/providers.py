@@ -12,7 +12,7 @@ Anthropic and needs vectors gets them somewhere else, so the boundary this
 project is about has TWO vendors behind it, not one, and the derived data, the
 part erasure forgets, lands with the embedding vendor rather than the one the
 architecture diagram names. `effective_embedding_provider` reports that
-explicitly rather than letting a caller read "provider = anthropic" and assume
+explicitly instead of letting a caller read "provider = anthropic" and assume
 the vectors went there too.
 
 Caching is correctness here, not just thrift. The erasure sweep re-embeds the
@@ -96,7 +96,7 @@ class OpenAIEmbedder:
 
     Two deliberate behaviors:
 
-    An empty text returns a zero vector rather than calling the API, which
+    An empty text returns a zero vector instead of calling the API, which
     rejects empty input. `cosine` already returns 0.0 for a zero vector, so an
     empty chunk simply never matches. The same thing the mock does, and the
     behavior the index needs, since an empty chunk is a real thing in a corpus.
@@ -104,7 +104,7 @@ class OpenAIEmbedder:
     `Dimensions` is declared, not discovered. The index and the verifier need a
     width before the first call, and `cosine` raises on a mismatch, so the
     declared value is asserted against the first vector the API returns instead
-    of being quietly adopted from it.
+    of being silently adopted from it.
     """
 
     def __init__(
@@ -211,7 +211,7 @@ class AnthropicModel:
         # Low effort: this is a one-sentence screening reply, not a reasoning
         # task, and effort is the only lever that bounds spend now that
         # budget_tokens is gone. Falls back on an SDK too old to know the
-        # parameter rather than failing a capture over a cost control.
+        # parameter instead of failing a capture over a cost control.
         try:
             message = self._client.messages.create(
                 **kwargs, output_config={"effort": "low"}

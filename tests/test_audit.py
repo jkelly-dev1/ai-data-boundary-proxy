@@ -129,6 +129,28 @@ def test_a_serialized_record_carries_exactly_the_hashed_fields_and_the_hash(froz
     assert set(HASHED_FIELDS) == set(SERIALIZED_FIELDS) - {"record_hash"}
 
 
+def test_a_second_process_resumes_the_trail_instead_of_erasing_it(tmp_path):
+    """Two logs pointed at one path, one after the other, as two processes
+    would be: the file holds both, as one chain. A file whose chain is broken
+    is refused rather than extended."""
+    target = tmp_path / "boundary.audit.jsonl"
+    first = AuditLog(path=target)
+    first.record(event="egress", tenant_id="acme", detail={"n": 1})
+    first.record(event="egress", tenant_id="acme", detail={"n": 2})
+    second = AuditLog(path=target)
+    second.record(event="egress", tenant_id="acme", detail={"n": 3})
+
+    on_disk = AuditLog.read(target)
+    assert [r.detail["n"] for r in on_disk.records] == [1, 2, 3]
+    assert on_disk.verify_chain() == (True, None, "chain intact")
+
+    lines = target.read_text(encoding="utf-8").splitlines()
+    lines[0] = lines[0].replace('"n":1', '"n":9')
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="refusing to extend"):
+        AuditLog(path=target).record(event="egress", tenant_id="acme")
+
+
 def test_a_configured_path_receives_every_record_as_it_is_made(tmp_path):
     """The file is the chain, written record by record, and it reads back.
 

@@ -25,8 +25,11 @@ def _decide(policy, text, destination):
     )
 
 
-def test_restricted_identifiers_never_reach_an_external_vendor(policy):
+def test_restricted_identifiers_never_reach_a_default_or_third_party_destination(policy):
     """No redaction makes an SSN acceptable at a default-terms vendor.
+
+    A vendor under no-training terms is outside this rule: it receives the
+    SSN redacted (R5), and the README says so.
 
     Mutation check, executed in-test: the same text to the internal model is
     allowed, so the denial is the destination and not the content alone.
@@ -37,6 +40,10 @@ def test_restricted_identifiers_never_reach_an_external_vendor(policy):
 
     internal = _decide(policy, SSN_TEXT, Destination.INTERNAL_MODEL)
     assert internal.action is Action.ALLOW
+
+    no_train = _decide(policy, SSN_TEXT, Destination.VENDOR_NO_TRAIN)
+    assert no_train.action is Action.REDACT
+    assert no_train.rule_id == "R5-no-train-vendor-redact"
 
 
 def test_a_direct_identifier_outside_never_external_is_denied_by_r3(policy):
@@ -84,10 +91,20 @@ def test_every_never_external_class_is_denied_by_r2_specifically(policy):
         assert verdict.rule_id == "R2-restricted-class-external", data_class
 
 
-def test_a_third_party_tool_receives_no_personal_data_at_all(policy):
+def test_a_third_party_tool_receives_no_detected_personal_data(policy):
     verdict = _decide(policy, "Contact jrivera@acme.example", Destination.THIRD_PARTY_TOOL)
     assert verdict.action is Action.DENY
     assert verdict.rule_id == "R1-third-party-any-pii"
+
+
+def test_an_undetected_name_reaches_a_third_party_tool(policy):
+    """The documented limit of R1, pinned: it denies what was DETECTED, and a
+    name that is not on the roster is not detected, so it goes out unchanged.
+    If this starts failing, the destination is denied outright and the
+    README's R1 row can say "no personal data at all" again."""
+    verdict = _decide(policy, "Please look up Ilya Sorokin's payroll history.",
+                      Destination.THIRD_PARTY_TOOL)
+    assert verdict.action is Action.ALLOW
 
 
 def test_clean_text_is_allowed_everywhere(policy):

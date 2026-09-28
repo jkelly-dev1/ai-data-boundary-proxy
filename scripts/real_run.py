@@ -13,7 +13,7 @@ the first rule, so a subject who is described rather than named is provably
 unreachable there, not because erasure worked, but because the instrument
 cannot see paraphrase.
 
-It refuses to run on the mock rather than producing a capture that looks like a
+It refuses to run on the mock instead of producing a capture that looks like a
 real one. See `main`.
 
 What it costs. Embeddings dominate the call count and cost fractions of a cent;
@@ -356,7 +356,8 @@ def section_completions(settings, model) -> None:
 
     corpus = build_corpus()
     suite = default_suite(corpus.roster)
-    proxy = build_proxy(key=settings.key_bytes(), roster=corpus.roster, model=model)
+    proxy = build_proxy(key=settings.key_bytes(), roster=corpus.roster, model=model,
+                        salt=settings.pseudonym_salt)
 
     print(f"  model                                  {model.name()}")
     print()
@@ -388,7 +389,7 @@ def section_completions(settings, model) -> None:
         # all. The rest of the file is plain ASCII; a sampled model's own words
         # are the one exception, because a capture of what a model said is
         # evidence and evidence is quoted as it arrived. Do not fold this line:
-        # "verbatim" stops meaning anything the first time it is quietly
+        # "verbatim" stops meaning anything the first time it is silently
         # true-ish.
         reply = " ".join((outcome.response or "").split())
         print(f"    reply (first 300 chars)            {reply[:300]}")

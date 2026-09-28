@@ -90,6 +90,22 @@ def test_a_snapshot_taken_before_the_destroy_still_opens_the_data():
     assert keys.open(hr, "snapshot:nightly") is not None
 
 
+def test_an_escrowed_key_is_found_by_the_key_material_probe():
+    """The probe tries the escrow account too, not only the live keyring and
+    the snapshots, and a key escrowed before the destroy still opens the
+    subject's data."""
+    corpus, index, emb, keys, sealed = sealed_corpus()
+    rivera = corpus.subjects[0]
+    keys.escrow_key(rivera.subject_id)
+    keys.destroy(rivera.subject_id)
+    verifier = ErasureVerifier(corpus.store, index, emb, keys=keys, sealed=sealed)
+    probe = next(
+        p for p in verifier.verify(rivera).probes if p.probe == "key_material_probe"
+    )
+    assert probe.leaked
+    assert "escrow" in probe.hits
+
+
 def test_purging_snapshots_completes_the_destroy():
     """Mutation check for the test above: with no backup, destroy is complete."""
     _, _, _, keys, sealed = sealed_corpus(snapshot="nightly")
@@ -119,8 +135,8 @@ def test_the_key_material_probe_attempts_a_real_decrypt():
     """Mutation check on the probe's independence.
 
     A key store that LIES about what it removed must not fool the probe. The
-    subclass below reports a complete destroy while quietly keeping the key;
-    the probe still finds it, because it decrypts rather than asking.
+    subclass below reports a complete destroy while silently keeping the key;
+    the probe still finds it, because it decrypts instead of asking.
     """
 
     class LyingKeyStore(KeyStore):
@@ -205,7 +221,7 @@ def test_a_probe_reads_what_the_running_system_can_read():
     assert all(string_probes.values()), string_probes
 
     # Once the live key is gone the subject's own record resolves to nothing,
-    # which is what crypto-shredding is: unreadability rather than absence.
+    # which is what crypto-shredding delivers, unreadability and not absence.
     # The ticket another subject owns stays readable through that subject's
     # wrap, so it is the HR record's hit that must disappear, not the probe.
     keys.destroy(rivera.subject_id)

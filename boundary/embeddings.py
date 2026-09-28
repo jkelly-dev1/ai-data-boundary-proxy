@@ -105,7 +105,7 @@ class HashingEmbedder:
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     """Cosine similarity. Both inputs are expected to be normalized already.
 
-    Returns 0.0 for a zero vector rather than raising: an empty chunk is a real
+    Returns 0.0 for a zero vector instead of raising: an empty chunk is a real
     thing in a corpus and should simply never match, not crash a sweep.
     """
     if len(a) != len(b):

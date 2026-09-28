@@ -58,7 +58,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m boundary.gate
 
-      # The demo is the offline end-to-end path. Running it in CI keeps
+      # The demo is the offline whole-pipeline path. Running it in CI keeps
       # SAMPLE_RUN.md honest: if the demo breaks, the build breaks.
       - name: Demo (offline mock)
         env:

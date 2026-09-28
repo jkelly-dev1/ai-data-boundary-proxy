@@ -227,7 +227,7 @@ def test_a_filtered_completion_is_reported_not_raised():
 # ------------------------------------------------------------------ factories
 
 
-# `Openai` and `anthropic` are optional and deliberately absent from
+# `Openai` and `anthropic` are optional and absent from
 # requirements.txt, so the offline suite installs nothing that can reach a
 # network. The suite must therefore pass without them. Anything that asserts on
 # a CONSTRUCTED real adapter needs the SDK and is skipped when it is missing;

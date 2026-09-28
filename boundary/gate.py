@@ -38,7 +38,7 @@ MIN_WEAK_LEAKS = 4
 # Overall detector recall is held inside a BAND, and both edges do work.
 #
 # The ceiling: perfect recall on this corpus means the unrostered names were
-# quietly added to the roster, which would delete the project's most honest
+# silently added to the roster, which would delete the project's most honest
 # finding. The floor: the labeled set has 13 expected (case, class) pairs and
 # the roster misses exactly two of them, so the shipped recall is 11/13 =
 # 0.846. Losing ANY further class, one deleted detector, one pattern edited
@@ -264,7 +264,8 @@ def _crypto_checks(emb) -> list[GateResult]:
         GateResult(
             "crypto_shred_text leaves the derived vector reachable",
             neighbor,
-            "neighbor_probe still finds vectors after the key is destroyed",
+            f"neighbor_probe {'still finds' if neighbor else 'finds no'} "
+            f"vectors after the key is destroyed",
         )
     )
 
@@ -280,11 +281,14 @@ def _crypto_checks(emb) -> list[GateResult]:
         GateResult(
             "sealed vectors survive only via a co-subject's key",
             shared_only,
-            f"{len(hits)} surviving vectors, every one wrapped for someone else",
+            f"{len(hits)} surviving vectors, "
+            f"{'every one' if shared_only else 'NOT every one'} wrapped for "
+            f"someone else",
         )
     )
 
-    # A surviving key backup defeats the erasure, and purging it does not.
+    # A surviving key backup defeats the erasure; with no backup taken, the
+    # same erasure leaves no key material.
     _, _, _, _, _, _, backed_up = shred(
         ErasureStrategy.CRYPTO_SHRED_TEXT, snapshot="nightly"
     )
@@ -295,7 +299,8 @@ def _crypto_checks(emb) -> list[GateResult]:
         GateResult(
             "a surviving key backup defeats crypto-shredding",
             with_backup.leaked and not without.leaked,
-            f"with backup {list(with_backup.hits)}; without, clean",
+            f"with backup {list(with_backup.hits)}; without, "
+            f"{'STILL LEAKING ' + str(list(without.hits)) if without.leaked else 'clean'}",
         )
     )
 
@@ -333,7 +338,8 @@ def _crypto_checks(emb) -> list[GateResult]:
             "a key-aware re-ingest is deterministic and does not resurrect",
             stable and no_resurrection,
             f"{trials[0][0]} -> {trials[0][1]} leaking, {trials[0][3]} documents "
-            f"skipped as undecryptable, identical across two runs",
+            f"skipped as undecryptable, "
+            f"{'identical' if stable else 'DIFFERENT'} across two runs",
         )
     )
 

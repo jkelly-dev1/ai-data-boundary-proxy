@@ -125,10 +125,10 @@ class Action(str, Enum):
 class RedactionStrategy(str, Enum):
     """How a detected span is rewritten.
 
-    PSEUDONYM is deliberately included and deliberately called out as unsafe in
-    a specific way: a stable pseudonym preserves linkage, so the same subject
-    is still trackable across requests by whoever receives them. That is a real
-    finding this project measures rather than a bug in the implementation.
+    PSEUDONYM is included and deliberately called out as unsafe in a specific
+    way: a stable pseudonym preserves linkage, so the same subject is still
+    trackable across requests by whoever receives them. That is a real finding
+    this project measures rather than a bug in the implementation.
     """
 
     MASK = "mask"                # [REDACTED:ssn]

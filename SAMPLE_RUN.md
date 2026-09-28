@@ -3,8 +3,8 @@
 Verbatim captures of `scripts/run_demo.py`, the boundary gate, the test suite,
 and the paid `scripts/real_run.py`, so a reviewer without an API key can see
 exactly what this project measures and what it refuses to claim. Nothing here
-is retyped, reformatted or cleaned up: every rate, interval, count and verdict
-below is the one the run produced. Offline captures 2026-09-08; real-model
+is retyped, reformatted or cleaned up: every rate, interval, count and
+verdict shown here is the one the run produced. Offline captures 2026-09-27; real-model
 captures 2026-08-02.
 
 Which captures are real, stated once so nothing below is over-read. Every number
@@ -13,11 +13,14 @@ evidence about the harness and about nothing else. The [real-model
 run](#the-real-model-run) is the exception and is labeled throughout: it was
 paid for against `text-embedding-3-small`, `claude-opus-5` and `gpt-5.6-terra`,
 and where it disagrees with the mock, it says so rather than the mock's number
-being quietly replaced.
+being silently replaced.
 
 What is and is not deterministic. Two runs of `scripts/run_demo.py` produce
 BYTE-IDENTICAL output, verified by running it twice into two files and diffing
-them. The audit trail's record hashes cover a live timestamp and therefore move
+them. With `AUDIT_LOG_PATH` set, the file is resumed rather than overwritten, so
+the file total printed beside its path grows from run to run; the `records made
+by this run` line does not, and a test runs the demo twice into one file to hold
+both. The audit trail's record hashes cover a live timestamp and therefore move
 between runs, but the demo prints chain verdicts rather than the hashes
 themselves, so the visible output is stable. A faked timestamp in an audit trail
 is worse than an honest one that varies, because the point of the log is that it
@@ -53,7 +56,7 @@ python scripts/run_demo.py
 ==============================================================================
 ai-data-boundary-proxy demo
 ==============================================================================
-  provider (effective)                   mock
+  model                                  offline mock; no provider is called
   tenants                                2
   documents                              8
   chunks                                 11
@@ -255,7 +258,7 @@ ai-data-boundary-proxy demo
 ==============================================================================
 6. Audit trail
 ==============================================================================
-  records                                4
+  records made by this run               4
   chain intact                           True (chain intact)
   written to                             nowhere: AUDIT_LOG_PATH is unset
   edit a record's contents               False at index 0: record contents do not match its hash
@@ -331,21 +334,21 @@ pytest -q
 ```
 
 ```
-........................................................................ [ 42%]
-........................................................................ [ 84%]
-...........................                                              [100%]
-171 passed in 2.44s
+........................................................................ [ 39%]
+........................................................................ [ 78%]
+........................................                                 [100%]
+184 passed in 7.79s
 ```
 
 This capture was taken with the optional SDKs installed, so nothing is
-skipped. Without them the same suite is 169 passed and 2 skipped, and the two
+skipped. Without them the same suite is 182 passed and 2 skipped, and the two
 skips are the point, not an omission: `openai` and `anthropic` are not in
 `requirements.txt`, so the offline suite installs nothing that can reach a
 network, and the two tests that assert on a CONSTRUCTED real adapter skip
 when the SDK is absent. The routing decision they exist to protect is asserted
 unconditionally by tests that run everywhere.
 
-The script tests are the slow ones and the reason the total moved from 0.26s:
+The script tests are the slow ones:
 they launch the documented commands as subprocesses with `PYTHONPATH` stripped,
 because that is the only way to reproduce what a reviewer types.
 
@@ -724,11 +727,12 @@ An HMAC is stable by construction, but this run observed it reaching one
 vendor, not two.
 
 The asymmetry the run made concrete. Anthropic publishes no embeddings endpoint,
-so the Anthropic capture prints `completion provider: anthropic` beside
-`embedding provider: mock` and skips sections 1 to 3, so nothing implies it
-measured them. A system that sends completions to one vendor gets its vectors
-from another: the boundary has two vendors behind it, and the derived data
-erasure forgets lands with the one the architecture diagram does not name.
+so a run configured for Anthropic prints `anthropic` on its `completion provider
+(effective)` line and `mock` on its `embedding provider (effective)` line, and
+the Anthropic capture skips sections 1 to 3, so nothing implies it measured
+them. A system that sends completions to one vendor gets its vectors from
+another: the boundary has two vendors behind it, and the derived data erasure
+forgets lands with the one the architecture diagram does not name.
 
 ## What the crypto-shredding captures show
 

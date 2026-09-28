@@ -74,9 +74,14 @@ a re-ingest. Only `full` survives, and only against the probes that read
 content: see the crypto section for what the other two reach.
 
 Ten probes, written independently of the eraser. Whether they are independent
-of each other is measured here. The verifier does not walk the eraser's
-lineage table. A verifier that reuses the eraser's map confirms its blind spots
-instead of finding them, so each probe reaches for the subject a different way:
+of each other is measured here. The verifier does not walk the eraser's lineage
+table. A verifier that reuses the eraser's map confirms its blind spots instead
+of finding them, so each probe reaches for the subject a different way. What
+they do share is how a subject is recognized: both match on the subject's
+`identifiers`, so an alias missing from that set would blind the eraser and
+every probe at once. The shipped corpus has none.
+
+Here is each probe and the reachability path it covers:
 
 | probe | reachability path it covers |
 |---|---|
@@ -128,7 +133,9 @@ Detection recall is below 1.0. Overall recall on the labeled set is `0.846
 [0.615, 1.000]` with zero false positives. Person-name detection is a roster, so
 it finds the names it was given and misses the two the corpus contains
 deliberately. Real name detection needs a model. The correct control is policy,
-which denies the destination, rather than a better regular expression.
+which denies the destination outright, rather than a better regular
+expression. The shipped R1 denies a third-party tool only what was detected,
+so an unrostered name reaches it; a test pins that.
 
 That number is held from both sides. The gate keeps recall inside a band,
 `0.80 <= recall < 0.999`, and pins the misses to exactly the two unrostered
@@ -201,7 +208,7 @@ floor:
 
 ```
 probe                     real@1536d   mock@256d   token overlap
-derived-data question       0.420 *      0.130         0.024
+derived-data question       0.420 *      0.130 x       0.024
 standing payroll access     0.447 *      0.428 x       0.067
 locked out after cutover    0.512 *      0.403 x       0.073
 (control) noise floor       0.216        0.253
@@ -209,8 +216,8 @@ locked out after cutover    0.512 *      0.403 x       0.073
 ```
 
 The real embedder ranks all three correctly and well clear of its floor, at
-token overlaps of 2-7%: semantic matches, not shared wording. The mock scores
-one below its own noise floor and returns the wrong chunk for the other two:
+token overlaps of 2-7%: semantic matches, not shared wording. The mock returns
+the wrong chunk for all three, and scores one of them below its own noise floor:
 its large-looking numbers are hash collisions, which is what the 256-dim
 calibration table in `boundary/embeddings.py` warns about. That residue was
 always there. The offline instrument is structurally blind to it, and so is
@@ -230,8 +237,9 @@ system that sends completions to Anthropic gets its vectors somewhere else. The
 boundary has two vendors behind it, and the derived data erasure forgets lands
 with the one the architecture diagram does not name.
 `effective_embedding_provider()` reports the two seams separately for exactly
-this reason, and a run configured for Anthropic prints `completion provider:
-anthropic` beside `embedding provider: mock`.
+this reason, and a run configured for Anthropic prints `anthropic` on its
+`completion provider (effective)` line and `mock` on its
+`embedding provider (effective)` line.
 
 What the run does not claim. One embedding model, one corpus, one prompt pair. A
 live model moves between runs, so these are captures rather than a baseline: the
@@ -279,7 +287,7 @@ eight opens for a single tenant-scoped query on this corpus. The structural
 consequence is that an encrypted index cannot carry an ANN structure, because
 the comparison that would build one is the thing that needs a key. That is
 reasoning, not a measurement: eleven chunks cannot demonstrate a complexity
-difference and the tests count decrypt operations rather than pretending to time
+difference and the tests count decrypt operations instead of pretending to time
 one. Searchable encryption, homomorphic similarity and secure enclaves are real
 answers to this and none of them are implemented here.
 
@@ -355,15 +363,15 @@ There are no primitives implemented in this repository.
 | Completely nested errors report zero marginal gain | `test_completely_nested_errors_report_zero_marginal_gain` |
 | Luhn rejects a number that only looks like a card | `test_luhn_rejects_a_number_that_only_looks_like_a_card` |
 | Structurally impossible SSNs are not reported | `test_structurally_impossible_ssns_are_not_reported` |
-| Restricted identifiers never reach an external vendor | `test_restricted_identifiers_never_reach_an_external_vendor` |
+| Restricted identifiers never reach a default-terms vendor or a third-party tool; a no-training vendor receives them redacted (R5) | `test_restricted_identifiers_never_reach_a_default_or_third_party_destination` |
 | Every NEVER_EXTERNAL class is denied by R2 specifically, and a direct identifier outside the set by R3, so the rule that fires is pinned and not only the outcome | `test_every_never_external_class_is_denied_by_r2_specifically`, `test_a_direct_identifier_outside_never_external_is_denied_by_r3` (mutation-checked: disable R3 and the email case becomes redact-and-send) |
-| A third-party tool receives no personal data at all | `test_a_third_party_tool_receives_no_personal_data_at_all` |
+| A third-party tool receives no DETECTED personal data. A name the roster does not hold is not detected and goes out unchanged, and that limit is pinned too | `test_a_third_party_tool_receives_no_detected_personal_data`, `test_an_undetected_name_reaches_a_third_party_tool` |
 | A mosaic of quasi-identifiers is denied with no direct one present | `test_a_mosaic_of_quasi_identifiers_is_denied_without_any_direct_one` |
 | The policy fails closed when no rule matches | `test_the_policy_fails_closed_when_no_rule_matches` |
 | A denied request forwards nothing | `test_a_denied_request_forwards_nothing` |
 | The egress result reports the strategies actually applied, per class | `test_the_egress_result_reports_the_strategies_actually_applied` |
-| A detector that raises fails closed | `test_a_detector_that_raises_fails_closed` |
-| Every label-driven rule -- job title, employer -- fires somewhere in the corpus, so a rule that stops matching is visible | `test_every_label_rule_class_fires_somewhere_in_the_corpus` (mutation-checked: drop `re.I` from the employer rule and its two corpus hits disappear) |
+| A detector that raises fails closed, on the request and on the reply, and the decision is audited | `test_a_detector_that_raises_fails_closed`, `test_a_detector_failure_is_audited_on_both_directions` |
+| Every label-driven rule -- job title, employer -- fires somewhere in the corpus, so a rule that stops matching is visible | `test_every_label_rule_class_fires_somewhere_in_the_corpus` (mutation-checked: make the employer rule's label case-sensitive and its two corpus hits disappear) |
 | The response is screened as well as the request | `test_the_response_is_screened_as_well_as_the_request` |
 | The response screen keys on the destination the reply came from, and the raw reply is delivered only when policy allows it | `test_the_response_screen_keys_on_the_destination_the_reply_came_from` |
 | Post-filtering by tenant returns fewer results than requested | `test_post_filtering_by_tenant_returns_fewer_results_than_requested` |
@@ -382,6 +390,13 @@ There are no primitives implemented in this repository.
 | The audit log never stores the data it is about | `test_the_log_never_stores_the_data_it_is_about` |
 | A serialized record carries exactly the hashed fields and the hash, so nothing reaches the file outside the integrity guarantee | `test_a_serialized_record_carries_exactly_the_hashed_fields_and_the_hash` |
 | A configured AUDIT_LOG_PATH receives every record as it is made, and the demo writes the file it names | `test_a_configured_path_receives_every_record_as_it_is_made`, `test_the_demo_writes_the_audit_file_the_configuration_names` |
+| A second process resumes the trail at the same path instead of erasing it, and a broken trail is not extended | `test_a_second_process_resumes_the_trail_instead_of_erasing_it` |
+| SAMPLE_RUN.md holds the demo and gate output the code prints now, so a moved figure fails the suite | `test_sample_run_holds_the_demo_output_the_code_prints`, `test_sample_run_holds_the_gate_output_the_code_prints` |
+| The README's tables and figures equal the demo output or the SAMPLE_RUN.md capture they are read from, and the strict/context pair equals its computation | `test_the_readme_erasure_tables_are_the_demo_output`, `test_the_readme_detection_figures_are_the_demo_output`, `test_the_readme_real_run_figures_are_the_captured_ones` |
+| The suite sizes stated with and without the provider SDKs are measured with the SDKs hidden | `test_the_no_sdk_suite_figures_are_derived` |
+| A second demo run into the same audit file prints the same records figure; only the file total grows | `test_a_second_run_into_the_same_audit_file_prints_the_same_records_figure` |
+| The key-material probe finds a key held in escrow | `test_an_escrowed_key_is_found_by_the_key_material_probe` |
+| BOUNDARY_PSEUDONYM_SALT reaches the pseudonymizer, including the proxy's own redactor | `test_the_demo_uses_the_configured_pseudonym_salt`, `test_the_proxy_redactor_applies_the_configured_salt` |
 | A single observation reports the full range, not certainty | `test_a_single_observation_reports_the_full_range_not_certainty` |
 | The bootstrap never touches the global random state | `test_the_bootstrap_never_touches_the_global_random_state` |
 | The gate runs on the mock even with a real provider configured | `test_the_gate_runs_on_the_mock_even_with_a_real_provider_configured` |
@@ -433,7 +448,7 @@ There are no primitives implemented in this repository.
 
 ```
 pip install -r requirements.txt
-pytest -q                          # 171 tests, offline; 2 skip without
+pytest -q                          # 184 tests, offline; 2 skip without
                                    # the optional provider SDKs
 python -m boundary.gate            # the CI gate
 python scripts/run_demo.py         # the full demonstration
@@ -443,13 +458,18 @@ Everything above runs offline against a deterministic mock. No key is needed and
 no network call is made. The two skips are the provider-SDK tests: `openai` and
 `anthropic` are optional and are not in `requirements.txt`, so nothing the
 offline suite installs can reach a network. Install the extras and the count is
-171 with nothing skipped. The number is re-derived by the suite itself:
+184 with nothing skipped. The number is re-derived by the suite itself:
 `test_the_readme_test_count_is_the_collected_count` compares this paragraph to
 `pytest --collect-only`.
 
 Set `AUDIT_LOG_PATH` to write the hash-chained audit trail to a file as each
 record is made; the demo's audit section names the file it wrote and re-reads
-it, and says `nowhere` when the variable is unset.
+it, and says `nowhere` when the variable is unset. A file that already holds a
+chain is resumed, not overwritten, so the file total the demo prints beside the
+path grows with each run into the same file; its `records made by this run` line
+counts only this run's records. The chain is a plain SHA-256 with no key and no
+external anchor: it catches an edit made in place, not an editor who recomputes
+every hash after the change, and not the removal of the last records.
 
 The paid capture is separate, opt-in, and refuses to run on the mock rather
 than producing a file that looks real:
@@ -460,9 +480,10 @@ ENV_FILE=~/.secrets/ai.env BOUNDARY_PROVIDER=openai    python scripts/real_run.p
 ENV_FILE=~/.secrets/ai.env BOUNDARY_PROVIDER=anthropic python scripts/real_run.py
 ```
 
-The full run is 22 embedding calls and 2 completion calls per provider. The
-script prints both counts from the vendors' own usage fields at the end, so the
-cost claim can be checked rather than trusted.
+The full run is 2 completion calls per provider and, on OpenAI only, 22
+embedding calls: Anthropic publishes no embeddings endpoint, so its run embeds
+on the mock. The script prints the counts from the vendors' own usage fields at
+the end, so the cost claim can be checked rather than trusted.
 
 ## How a request flows
 
@@ -511,7 +532,7 @@ crossed the boundary the other way.
    change that invalidates it fails the suite.
 
 4. **Person-name detection is a roster.** Measured recall is below 1.0 by
-   construction. This is a finding, not a defect to be tuned away.
+   construction. That is the finding, and tuning it away would hide it.
 
 5. **The vector index is brute force and in memory.** The adapter seam for a
    real store exists; no real store has been measured, and pgvector, Qdrant and
@@ -562,7 +583,7 @@ crossed the boundary the other way.
 - Key rotation models one operation and a disaster-recovery rebuild. No key
   hierarchy, no KMS adapter, no re-encryption of bodies.
 - The eval-set store is NOT implemented. It is named in the six-store list
-  because a production system has one, and it is the obvious next store to
+  because a production system has one, and it would be the next store to
   model; nothing in the corpus or the probes represents it today.
 - Erasure is single-subject. Bulk erasure and its cost model are unaddressed.
 
@@ -588,8 +609,9 @@ All fifteen siblings link back to this one:
 - [parser-eval](https://github.com/jkelly-dev1/parser-eval)
 
 The corpus is synthetic. The organizations are fictional, every host uses an
-`.example` TLD reserved by RFC 2606, every SSN is drawn from ranges the SSA
-never issues, and every card number is a published test value. No real personal
+`.example` TLD reserved by RFC 2606, every SSN is a synthetic number not known
+to belong to anyone (the areas are issuable, because the strict detector
+rejects never-issued ones), and every card number is a published test value. No real personal
 data is in this repository.
 
 ## License

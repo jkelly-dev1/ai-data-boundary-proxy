@@ -1,6 +1,6 @@
 """PII detectors, and the honest accounting of what they miss.
 
-Three detector FAMILIES are implemented, deliberately overlapping, because the
+Three detector FAMILIES are implemented overlapping, because the
 question this project answers is not "can a regex find an SSN" but "how much
 does a second detector add once you already have the first". The answer, which
 metrics.py measures rather than asserts, is usually much less than the vendor

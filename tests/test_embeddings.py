@@ -50,7 +50,7 @@ def test_the_dimension_sweep_still_justifies_the_pinned_value():
 
     At 64 dimensions the two populations must still fail to separate, and at
     256 they must still succeed. If this breaks, the constant needs
-    re-deriving rather than nudging.
+    re-deriving instead of nudging.
     """
     corpus = build_corpus()
 

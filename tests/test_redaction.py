@@ -72,7 +72,7 @@ def test_pseudonym_tokens_do_not_reveal_the_value():
 
 
 def test_partial_redaction_of_a_card_keeps_only_the_last_four():
-    """The exact output shape, so "keeps four" cannot quietly keep twelve.
+    """The exact output shape, so "keeps four" cannot silently keep twelve.
 
     Mutation check, executed against `_partial`: keep 12 digits and the card
     line reads `card ****111111111111 ok`, which the exact comparison

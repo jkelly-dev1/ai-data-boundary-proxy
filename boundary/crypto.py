@@ -168,7 +168,7 @@ class KeyStore:
     def ensure(self, subject_id: str) -> Optional[bytes]:
         """The live key, or None when the subject has been erased.
 
-        Returns None rather than raising so `seal` can omit the wrap and carry
+        Returns None instead of raising so `seal` can omit the wrap and carry
         on, which is what a real pipeline does: it seals the record for the
         people it still has keys for and notices nothing.
         """
@@ -194,10 +194,10 @@ class KeyStore:
     def destroy(self, subject_id: str) -> DestroyReceipt:
         """Delete the LIVE key and nothing else.
 
-        This is deliberately not a thorough delete. A `DELETE` against a key
-        manager removes the working key; it does not reach into last night's
-        snapshot or into the escrow account. Modeling the narrow version is
-        what gives `key_material_probe` something true to find.
+        This is not a thorough delete. A `DELETE` against a key manager removes
+        the working key; it does not reach into last night's snapshot or into
+        the escrow account. Modeling the narrow version is what gives
+        `key_material_probe` something true to find.
         """
         removed = []
         if self.live.pop(subject_id, None) is not None:
@@ -336,7 +336,7 @@ class KeyStore:
 
         Returns the receipt and a map of {id(old_envelope): new_envelope}, so
         the caller can substitute them. Envelopes are frozen, so rotation
-        produces new ones rather than mutating in place.
+        produces new ones instead of mutating in place.
         """
         old_kek = self.get(subject_id, source)
         was_live = subject_id in self.live
@@ -502,8 +502,8 @@ def vector_opener(keys: KeyStore, envelope: object) -> Optional[tuple[float, ...
     """Open a sealed vector with LIVE key material, or return None.
 
     Wired into `VectorIndex.opener` by `seal_store` when sealing vectors. LIVE
-    only, deliberately: an index that quietly reached into a key backup to
-    answer a query would be a worse bug than the one this project measures.
+    only: an index that silently reached into a key backup to answer a query
+    would be a worse bug than the one this project measures.
     """
     blob = keys.open(envelope, source=LIVE)  # type: ignore[arg-type]
     return unpack_vector(blob) if blob is not None else None

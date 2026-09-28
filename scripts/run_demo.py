@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """End-to-end demonstration, offline and deterministic by default.
 
-Two runs produce identical output except for the audit record hashes, which
-cover a live timestamp on purpose. See boundary/audit.py.
+Two runs produce identical output. The audit record hashes cover a live
+timestamp and are not printed. With AUDIT_LOG_PATH set, the file total printed
+beside the path includes the records of earlier runs into the same file.
 """
 from __future__ import annotations
 
@@ -61,7 +62,10 @@ def header(settings) -> None:
     print(RULE)
     print("ai-data-boundary-proxy demo")
     print(RULE)
-    print(f"  provider (effective)                   {settings.effective_provider()}")
+    # The demo runs the offline EchoModel and the hash embedder whatever the
+    # settings name; printing the configured provider would put a real
+    # provider's name on a capture that never called it.
+    print("  model                                  offline mock; no provider is called")
     print(f"  tenants                                {len(set(d.tenant_id for d in corpus.store.documents.values()))}")
     print(f"  documents                              {len(corpus.store.documents)}")
     print(f"  chunks                                 {len(corpus.store.chunks)}")
@@ -117,7 +121,8 @@ def section_policy(settings) -> None:
     print("2. Egress policy: what may leave at all")
     print(RULE)
     audit = AuditLog()
-    proxy = build_proxy(key=settings.key_bytes(), roster=ROSTER, audit=audit)
+    proxy = build_proxy(key=settings.key_bytes(), roster=ROSTER, audit=audit,
+                        salt=settings.pseudonym_salt)
 
     # The real HR record from the corpus, not a hand-written sample, so what
     # the policy decides here is what it decides on the actual data.
@@ -141,7 +146,8 @@ def section_policy(settings) -> None:
     print(THIN)
     suite = default_suite(ROSTER)
     findings = suite.run(sample)
-    redactor = Redactor(pseudonymizer=Pseudonymizer(settings.key_bytes()))
+    redactor = Redactor(pseudonymizer=Pseudonymizer(settings.key_bytes(),
+                                                    settings.pseudonym_salt))
     out = redactor.apply(sample, findings)
     survived = residual_classes(sample, findings, redactor)
     residual = reidentification_residual(findings, survived)
@@ -159,7 +165,7 @@ def section_policy(settings) -> None:
     print(THIN)
     print("  Pseudonyms preserve linkage")
     print(THIN)
-    ps = Pseudonymizer(settings.key_bytes())
+    ps = Pseudonymizer(settings.key_bytes(), settings.pseudonym_salt)
     from boundary.models import DataClass
 
     a = ps.token(DataClass.EMAIL, "jrivera@acme.example")
@@ -382,7 +388,15 @@ def section_audit(settings) -> None:
     # The file is where AUDIT_LOG_PATH points, and the demo says which. A
     # configuration key that names a file nothing writes is worse than no key.
     audit = AuditLog(path=settings.audit_log_path)
-    proxy = build_proxy(key=settings.key_bytes(), roster=ROSTER, audit=audit)
+    # A file that already holds a chain is resumed, so the log's length counts
+    # earlier runs as well. The count this run made is printed on its own line
+    # and the file total beside the path, so a second run into the same file
+    # prints the same records figure as the first.
+    resumed = 0
+    if settings.audit_log_path and Path(settings.audit_log_path).exists():
+        resumed = len(AuditLog.read(settings.audit_log_path))
+    proxy = build_proxy(key=settings.key_bytes(), roster=ROSTER, audit=audit,
+                        salt=settings.pseudonym_salt)
     for dest in (Destination.INTERNAL_MODEL, Destination.VENDOR_NO_TRAIN):
         proxy.send(
             EgressRequest(
@@ -392,13 +406,13 @@ def section_audit(settings) -> None:
             )
         )
     intact, bad, reason = audit.verify_chain()
-    print(f"  records                                {len(audit)}")
+    print(f"  records made by this run               {len(audit) - resumed}")
     print(f"  chain intact                           {intact} ({reason})")
     if settings.audit_log_path:
         on_disk = AuditLog.read(settings.audit_log_path)
         print(
             f"  written to                             {settings.audit_log_path} "
-            f"({len(on_disk)} records, re-read chain intact "
+            f"({len(on_disk)} records in the file, re-read chain intact "
             f"{on_disk.verify_chain()[0]})"
         )
     else:

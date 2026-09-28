@@ -1,16 +1,22 @@
-"""A hash-chained, tamper-evident record of every boundary decision.
+"""A hash-chained record of every boundary decision, for catching edits made in place.
 
 Each record carries the hash of the one before it, so the log is a chain rather
 than a list. Editing a record, reordering two, or excising one and relinking
 the survivor all break the chain at a detectable point, and `verify_chain()`
 reports the first index where it breaks.
 
-What is deliberately not hashed: nothing. The hash covers the canonical JSON of
-every field including the timestamp, which means two runs produce different
-record hashes. That is the honest choice. Freezing the clock to make the log
-byte-reproducible would defeat the purpose of an audit trail, whose entire
-value is that it says WHEN a decision was made. Reproducibility comes from
-canonical serialization with sorted keys, not from pinning time.
+What it does not catch. The hash is a plain SHA-256 with no key and no
+external anchor, so an editor who changes a record and recomputes every hash
+after it produces a chain that verifies, and so does one who removes the last
+records. It is evidence against accident and against an edit made in place,
+not against someone with write access who recomputes the chain.
+
+What is not hashed: nothing. The hash covers the canonical JSON of every field
+including the timestamp, which means two runs produce different record hashes.
+That is the honest choice. Freezing the clock to make the log byte-reproducible
+would defeat the purpose of an audit trail, whose entire value is that it says
+WHEN a decision was made. Reproducibility comes from canonical serialization
+with sorted keys, not from pinning time.
 
 The log never contains the data it is about. Records store counts, class names,
 rule ids and decisions: never the text, never a detected value. An audit trail
@@ -37,7 +43,7 @@ GENESIS = "0" * 64
 # Fields covered by the record hash. The hashed payload and the serialized
 # line are both BUILT FROM this tuple, so a field cannot be added to the
 # record and reach the file without also entering the hash; `payload()` reads
-# these names off the record rather than listing them a second time.
+# these names off the record instead of listing them a second time.
 HASHED_FIELDS = ("seq", "timestamp", "event", "tenant_id", "detail", "prev_hash")
 
 # Everything a serialized record carries: the hashed fields and the hash
@@ -79,10 +85,11 @@ class AuditRecord:
 class AuditLog:
     """Append-only chain of decisions.
 
-    `path`, when given, is where the chain is written. The file holds THIS
-    log's chain: it is created on the first record and appended to on every
-    record after that, so a reader sees the same sequence the process holds,
-    starting at GENESIS, with nothing from any other process in front of it.
+    `path`, when given, is where the chain is written. A file that already
+    holds a chain is RESUMED, not overwritten: its records are read back,
+    verified, and the new records continue its sequence, so a second process
+    pointed at the same path adds to the trail instead of erasing the first
+    one's. A file whose chain does not verify is refused rather than extended.
     """
 
     records: list[AuditRecord] = field(default_factory=list)
@@ -97,6 +104,8 @@ class AuditLog:
     def record(
         self, event: str, tenant_id: str, detail: Optional[dict[str, Any]] = None
     ) -> AuditRecord:
+        if self.path is not None and not self.records:
+            self._resume(Path(self.path))
         prev = self.records[-1].record_hash if self.records else GENESIS
         rec = AuditRecord(
             seq=len(self.records),
@@ -111,10 +120,22 @@ class AuditLog:
         if self.path is not None:
             target = Path(self.path)
             target.parent.mkdir(parents=True, exist_ok=True)
-            mode = "w" if len(self.records) == 1 else "a"
-            with target.open(mode, encoding="utf-8") as fh:
+            with target.open("a", encoding="utf-8") as fh:
                 fh.write(rec.serialize() + "\n")
         return rec
+
+    def _resume(self, target: Path) -> None:
+        """Load a chain another process left at `target`, if there is one."""
+        if not target.exists() or target.stat().st_size == 0:
+            return
+        existing = AuditLog.read(target)
+        intact, index, reason = existing.verify_chain()
+        if not intact:
+            raise ValueError(
+                f"refusing to extend the audit trail at {target}: its chain "
+                f"breaks at record {index} ({reason})"
+            )
+        self.records = list(existing.records)
 
     @classmethod
     def from_jsonl(cls, text: str) -> "AuditLog":

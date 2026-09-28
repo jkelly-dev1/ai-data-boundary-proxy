@@ -155,10 +155,10 @@ class ErasureVerifier:
         matches nothing. Erasure then shows up as unreadability rather than as
         an absence of bytes, which is what crypto-shredding actually is.
 
-        Live key material only. Snapshots and escrow are deliberately not
-        consulted here; they are `_key_material_probe`'s job. Letting a
-        surviving backup light up all seven string probes would report one
-        failure seven times and bury the finding that produced it.
+        Live key material only. Snapshots and escrow are not consulted here;
+        they are `_key_material_probe`'s job. Letting a surviving backup light
+        up all seven string probes would report one failure seven times and
+        bury the finding that produced it.
         """
         if self.sealed is None or self.keys is None:
             return stored

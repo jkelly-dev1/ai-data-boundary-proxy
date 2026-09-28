@@ -317,7 +317,7 @@ class ErasureEngine:
         What changed is that the running system can no longer read it.
 
         `envelopes_orphaned` counts the artifacts the subject can no longer
-        open FROM ANY SOURCE. It is deliberately not "artifacts wrapped for the
+        open FROM ANY SOURCE. It is not "artifacts wrapped for the
         subject": an envelope whose key survives in last night's snapshot is
         not orphaned, it is merely inconvenient, and counting it as erased is
         the exact self-flattering error this project exists to catch.

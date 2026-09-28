@@ -61,6 +61,37 @@ def test_a_detector_that_raises_fails_closed():
     assert "detector" in result.verdict.rule_id
 
 
+def test_a_detector_failure_is_audited_on_both_directions():
+    """A fail-closed decision is still a decision, so it gets a record; and a
+    detector that raises on the REPLY denies delivery instead of raising out
+    of send()."""
+    audit = AuditLog()
+    proxy = build_proxy(key=KEY, audit=audit)
+    proxy.detectors = DetectorSuite({"boom": lambda text: 1 / 0})
+    proxy.evaluate(EgressRequest(tenant_id="acme", text="hello",
+                                 destination=Destination.INTERNAL_MODEL))
+    assert [r.detail["rule_id"] for r in audit.events("egress")] == [
+        "R0-detector-error"]
+
+    calls = {"n": 0}
+
+    def fails_on_the_reply(text):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("reply detector exploded")
+        return ()
+
+    audit = AuditLog()
+    proxy = build_proxy(key=KEY, audit=audit)
+    proxy.detectors = DetectorSuite({"flaky": fails_on_the_reply})
+    outcome = proxy.send(EgressRequest(tenant_id="acme", text="hello",
+                                       destination=Destination.INTERNAL_MODEL))
+    assert outcome.delivered is None
+    assert outcome.response_blocked
+    assert [r.event for r in audit.records] == ["egress", "ingress"]
+    assert audit.records[1].detail["rule_id"] == "R0-detector-error"
+
+
 def test_forwarded_text_to_a_vendor_is_redacted_not_original():
     proxy = build_proxy(key=KEY, roster=ROSTER)
     result = proxy.evaluate(
@@ -211,3 +242,31 @@ def test_every_decision_is_audited():
 def test_the_mock_model_is_deterministic():
     model = EchoModel()
     assert model.complete("hello world") == model.complete("hello world")
+
+
+def test_the_proxy_redactor_applies_the_configured_salt():
+    """The token the proxy forwards depends on the salt `build_proxy` gets.
+
+    The demo's standalone token line cannot show this, because it builds its
+    own Pseudonymizer. This reads the text the proxy itself sends to a
+    no-training vendor, where the address is pseudonymized, and compares it
+    with the token a Pseudonymizer under the same key and salt computes.
+    """
+    import re
+
+    from boundary.redaction import Pseudonymizer
+
+    text = "Contact jrivera@acme.example about the ticket."
+    sent = {}
+    for salt in ("", "2026-08"):
+        result = build_proxy(key=KEY, roster=ROSTER, salt=salt).evaluate(
+            EgressRequest(tenant_id="acme", text=text, destination=Destination.VENDOR_NO_TRAIN)
+        )
+        assert result.verdict.action is Action.REDACT
+        tokens = re.findall(r"\[EMAIL_[0-9a-f]+\]", result.forwarded_text or "")
+        assert len(tokens) == 1, result.forwarded_text
+        assert tokens[0] == Pseudonymizer(KEY, salt).token(
+            DataClass.EMAIL, "jrivera@acme.example"
+        )
+        sent[salt] = tokens[0]
+    assert sent[""] != sent["2026-08"]

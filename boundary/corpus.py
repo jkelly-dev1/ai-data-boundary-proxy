@@ -24,7 +24,7 @@ on purpose:
   CROSS-TENANT          a mention of a Tenant A subject inside a Tenant B
                         document, which is a pre-existing isolation failure
                         that erasure then has to clean up.
-  UNROSTERED-NAME       a person whose name is deliberately absent from the
+  UNROSTERED-NAME       a person whose name is absent from the
                         detector roster, so measured name recall is below 1.0
                         and the README's headline stays honest.
 """

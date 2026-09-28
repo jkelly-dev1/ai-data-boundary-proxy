@@ -4,9 +4,10 @@
 
 Two properties are enforced here rather than documented.
 
-Fail closed. Every failure path returns DENY. A detector that raises, a rule
-set with a gap, a destination the policy has no opinion about: all of them
-end with nothing leaving. The alternative, where an unexpected condition
+Fail closed. Every failure path returns DENY and is audited. A detector that
+raises, on the request or on the reply, a rule set with a gap, a destination
+the policy has no opinion about: all of them end with nothing leaving, or with
+nothing delivered. The alternative, where an unexpected condition
 forwards the original text, is how boundaries leak in production, and it is
 always the result of an exception handler written for availability.
 
@@ -119,12 +120,24 @@ class BoundaryProxy:
         """Detect, decide, and redact, without forwarding anything."""
         try:
             findings = self.detectors.run(request.text)
-        except Exception as exc:  # fail closed, deliberately broad
+        except Exception as exc:  # fail closed broad
             verdict = PolicyVerdict(
                 action=Action.DENY,
                 rule_id="R0-detector-error",
                 reason=f"detector raised, failing closed: {type(exc).__name__}",
             )
+            if self.audit is not None:
+                self.audit.record(
+                    event="egress",
+                    tenant_id=request.tenant_id,
+                    detail={
+                        "destination": request.destination.value,
+                        "action": verdict.action.value,
+                        "rule_id": verdict.rule_id,
+                        "findings": 0,
+                        "residual": [],
+                    },
+                )
             return EgressResult(
                 verdict=verdict,
                 forwarded_text=None,
@@ -192,14 +205,24 @@ class BoundaryProxy:
         # boundary the other way, and the party on the far side is the party
         # the request went to. Screening every reply as if it came from the
         # internal model would allow every reply, whatever it carried.
-        inbound_findings = self.detectors.run(response)
         inbound_request = EgressRequest(
             tenant_id=request.tenant_id,
             text=response,
             destination=request.destination,
             purpose="response_screen",
         )
-        verdict = self.policy.decide(inbound_request, inbound_findings)
+        try:
+            inbound_findings = self.detectors.run(response)
+        except Exception as exc:  # fail closed on the reply as on the request
+            inbound_findings = ()
+            verdict = PolicyVerdict(
+                action=Action.DENY,
+                rule_id="R0-detector-error",
+                reason=f"detector raised on the reply, failing closed: "
+                       f"{type(exc).__name__}",
+            )
+        else:
+            verdict = self.policy.decide(inbound_request, inbound_findings)
         redacted = None
         if inbound_findings:
             redacted = self.redactor.apply(response, inbound_findings).text
@@ -238,8 +261,8 @@ class BoundaryProxy:
     ) -> list[SearchHit]:
         """Tenant-scoped retrieval, pre-filtered at the source.
 
-        `post_filter` is not exposed here on purpose. The broken variant exists
-        in index.py so it can be TESTED, not so it can be called by the
+        `post_filter` is not exposed here. The broken variant exists in
+        index.py so it can be TESTED, not so it can be called by the
         application path.
         """
         qv = embedder.embed(query)
@@ -258,12 +281,13 @@ def build_proxy(
     roster: tuple[str, ...] = (),
     audit: Optional[AuditLog] = None,
     model: Optional[ModelClient] = None,
+    salt: str = "",
 ) -> BoundaryProxy:
     from boundary.redaction import Pseudonymizer
 
     return BoundaryProxy(
         policy=PolicyEngine(),
-        redactor=Redactor(pseudonymizer=Pseudonymizer(key)),
+        redactor=Redactor(pseudonymizer=Pseudonymizer(key, salt)),
         detectors=default_suite(roster),
         model=model or EchoModel(),
         audit=audit,

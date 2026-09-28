@@ -90,8 +90,8 @@ def default_rules() -> tuple[Rule, ...]:
             rule_id="R2-restricted-class-external",
             action=Action.DENY,
             reason=(
-                "restricted identifiers do not leave the boundary toward an "
-                "external vendor, redacted or not"
+                "restricted identifiers do not go to a default-terms vendor "
+                "or a third-party tool, redacted or not"
             ),
             applies=lambda req, f: (
                 req.destination
@@ -174,7 +174,7 @@ class PolicyEngine:
         # A request that matches nothing is DENIED, not allowed. An egress
         # policy whose default is "send it" fails open, and a boundary that
         # fails open is not a boundary. Reaching this line means the rule set
-        # has a gap, and the rule_id says so rather than pretending the denial
+        # has a gap, and the rule_id says so instead of pretending the denial
         # was intentional.
         return PolicyVerdict(
             action=Action.DENY,
